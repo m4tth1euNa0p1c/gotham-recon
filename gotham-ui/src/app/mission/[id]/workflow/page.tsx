@@ -58,8 +58,10 @@ function WorkflowContent() {
   const dataLoadedRef = useRef<string | null>(null);
 
   // Fetch mission details first, then decide whether to connect live or load historical
+  // Always fetch if missionId doesn't match current mission (e.g., user navigated from history)
   useEffect(() => {
-    if (missionId && !currentMission) {
+    if (missionId && (!currentMission || currentMission.id !== missionId)) {
+      console.log("[Workflow] Fetching mission:", missionId, "current:", currentMission?.id);
       fetchMission(missionId);
     }
   }, [missionId, currentMission, fetchMission]);

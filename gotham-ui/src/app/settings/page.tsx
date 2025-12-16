@@ -4,6 +4,7 @@ import { useState } from "react";
 import { motion } from "framer-motion";
 import { Settings, Server, Shield, Bell, Palette, Database, Key, Save, RefreshCw } from "lucide-react";
 import Sidebar from "@/components/dashboard/Sidebar";
+import { API_CONFIG } from "@/lib/api";
 
 interface SettingsSection {
   id: string;
@@ -28,9 +29,9 @@ export default function SettingsPage() {
     maxConcurrentMissions: 3,
 
     // API
-    orchestratorUrl: "http://localhost:8000",
-    graphServiceUrl: "http://localhost:8001",
-    bffGatewayUrl: "http://localhost:8080",
+    orchestratorUrl: API_CONFIG.BFF_GATEWAY.replace(':8080', ':8000'),
+    graphServiceUrl: API_CONFIG.BFF_GATEWAY.replace(':8080', ':8001'),
+    bffGatewayUrl: API_CONFIG.BFF_GATEWAY,
 
     // Security
     requireAuth: false,

@@ -6,6 +6,7 @@ import { format } from "date-fns";
 import { motion, AnimatePresence } from "framer-motion";
 import { Shield, Clock, ArrowRight, Activity, Trash2, AlertTriangle, X } from "lucide-react";
 import { MissionService, Mission } from "@/services/MissionService";
+import { useMissionStore } from "@/stores/missionStore";
 
 // Confirmation Dialog Component
 function ConfirmDialog({
@@ -74,6 +75,9 @@ export default function MissionList() {
     const [deleteConfirm, setDeleteConfirm] = useState<{ type: 'mission' | 'all'; missionId?: string } | null>(null);
     const [isDeleting, setIsDeleting] = useState(false);
 
+    // Get setCurrentMission from store to update selected mission
+    const setCurrentMission = useMissionStore((state) => state.setCurrentMission);
+
     useEffect(() => {
         loadMissions();
     }, []);
@@ -135,8 +139,10 @@ export default function MissionList() {
         }
     };
 
-    const handleMissionClick = (missionId: string) => {
-        router.push(`/mission/${missionId}/workflow`);
+    const handleMissionClick = (mission: Mission) => {
+        // Update the current mission in the store BEFORE navigating
+        setCurrentMission(mission);
+        router.push(`/mission/${mission.id}/workflow`);
     };
 
     if (isLoading) {
@@ -200,7 +206,7 @@ export default function MissionList() {
                             <div className="flex items-center justify-between">
                                 <div
                                     className="flex items-center gap-4 flex-1 cursor-pointer"
-                                    onClick={() => handleMissionClick(mission.id)}
+                                    onClick={() => handleMissionClick(mission)}
                                 >
                                     <div className={`w-10 h-10 rounded flex items-center justify-center border ${getStatusColor(mission.status)}`}>
                                         <Shield size={18} />
@@ -248,7 +254,7 @@ export default function MissionList() {
 
                                     <div
                                         className="cursor-pointer"
-                                        onClick={() => handleMissionClick(mission.id)}
+                                        onClick={() => handleMissionClick(mission)}
                                     >
                                         <ArrowRight className="w-4 h-4 text-slate-600 group-hover:text-cyan-400 transform group-hover:translate-x-1 transition-all" />
                                     </div>

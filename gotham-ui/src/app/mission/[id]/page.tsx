@@ -2,7 +2,7 @@
 
 import { useParams } from "next/navigation";
 import { useEffect, useState, useMemo } from "react";
-import { graphqlFetch, QUERIES, Mission } from "@/lib/api";
+import { graphqlFetch, QUERIES, Mission, API_CONFIG } from "@/lib/api";
 import {
   Loader2,
   ArrowLeft,
@@ -154,7 +154,8 @@ export default function MissionDetailPage() {
 
         // Fetch full mission details from orchestrator REST API
         try {
-          const res = await fetch(`http://localhost:8000/api/v1/missions/${missionId}`);
+          const orchestratorUrl = API_CONFIG.BFF_GATEWAY.replace(':8080', ':8000');
+          const res = await fetch(`${orchestratorUrl}/api/v1/missions/${missionId}`);
           if (res.ok) {
             const details = await res.json();
             setMissionDetails(details.progress);
