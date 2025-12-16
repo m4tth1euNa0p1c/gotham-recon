@@ -1,0 +1,45 @@
+{
+  "id": "server-info-disclosure-01",
+  "name": "Server Information Disclosure",
+  "version": "1.0.0",
+  "category": "header_analysis",
+  "target": "{target_url}",
+  "method": "GET",
+  "headers": {},
+  "body": null,
+  "query_params": {},
+  "stop_conditions": [],
+  "timeout": 30,
+  "follow_redirects": true,
+  "max_redirects": 3,
+  "expected_proof": [
+    {
+      "type": "header",
+      "pattern": "Server:\\s*(Apache|nginx|IIS|Tomcat|Express|Kestrel)[/\\s]?([0-9.]+)?",
+      "value": null,
+      "description": "Server header reveals software and potentially version"
+    },
+    {
+      "type": "header",
+      "pattern": "X-Powered-By:\\s*.+",
+      "value": null,
+      "description": "X-Powered-By header reveals backend technology"
+    },
+    {
+      "type": "header",
+      "pattern": "X-AspNet-Version:\\s*.+",
+      "value": null,
+      "description": "ASP.NET version disclosure"
+    }
+  ],
+  "max_status": "CONFIRMED",
+  "attack_type": "INFO_DISCLOSURE",
+  "severity": "INFO",
+  "description": "Checks if server reveals software name and version in response headers",
+  "references": [
+    "CWE-200",
+    "https://owasp.org/www-project-web-security-testing-guide/latest/4-Web_Application_Security_Testing/01-Information_Gathering/02-Fingerprint_Web_Server"
+  ],
+  "allowed_modes": ["STEALTH", "BALANCED", "AGGRESSIVE"],
+  "requires_auth": false
+}

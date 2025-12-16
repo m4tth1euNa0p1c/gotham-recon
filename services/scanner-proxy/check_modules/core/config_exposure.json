@@ -1,0 +1,45 @@
+{
+  "id": "config-exposure-01",
+  "name": "Common Config File Exposure",
+  "version": "1.0.0",
+  "category": "config_exposure",
+  "target": "{target_url}/.env",
+  "method": "GET",
+  "headers": {},
+  "body": null,
+  "query_params": {},
+  "stop_conditions": [
+    {
+      "type": "status_code",
+      "value": 404,
+      "operator": "equals"
+    }
+  ],
+  "timeout": 30,
+  "follow_redirects": false,
+  "max_redirects": 0,
+  "expected_proof": [
+    {
+      "type": "status_code",
+      "pattern": null,
+      "value": 200,
+      "description": ".env file accessible - may contain secrets"
+    },
+    {
+      "type": "body_pattern",
+      "pattern": "(DB_|API_KEY|SECRET|PASSWORD|AWS_|MYSQL_)",
+      "value": null,
+      "description": "Environment variables pattern found in response"
+    }
+  ],
+  "max_status": "CONFIRMED",
+  "attack_type": "INFO_DISCLOSURE",
+  "severity": "CRITICAL",
+  "description": "Checks if .env configuration file is publicly accessible",
+  "references": [
+    "CWE-200",
+    "CWE-538"
+  ],
+  "allowed_modes": ["BALANCED", "AGGRESSIVE"],
+  "requires_auth": false
+}

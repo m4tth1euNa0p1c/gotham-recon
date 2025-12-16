@@ -1,0 +1,33 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Gotham services - /metrics not implemented yet
+  # Uncomment when prometheus-fastapi-instrumentator is added
+  # - job_name: 'gotham-services'
+  #   metrics_path: /metrics
+  #   static_configs:
+  #     - targets:
+  #         - 'graph-service:8001'
+  #         - 'recon-orchestrator:8000'
+  #         - 'bff-gateway:8080'
+  #         - 'osint-runner:8002'
+  #         - 'active-recon:8003'
+  #         - 'endpoint-intel:8004'
+  #         - 'verification:8005'
+  #         - 'reporter:8006'
+  #         - 'planner:8007'
+
+  # Health endpoint probe (alternative until /metrics is available)
+  - job_name: 'gotham-health'
+    metrics_path: /health
+    static_configs:
+      - targets:
+          - 'graph-service:8001'
+          - 'recon-orchestrator:8000'
+          - 'bff-gateway:8080'

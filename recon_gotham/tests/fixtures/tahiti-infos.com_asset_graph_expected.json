@@ -1,0 +1,44 @@
+{
+    "nodes": [
+        {
+            "id": "www.tahiti-infos.com",
+            "type": "SUBDOMAIN",
+            "properties": {
+                "name": "www.tahiti-infos.com"
+            }
+        },
+        {
+            "id": "m.tahiti-infos.com",
+            "type": "SUBDOMAIN",
+            "properties": {
+                "name": "m.tahiti-infos.com"
+            }
+        },
+        {
+            "id": "suivi.mailings.tahiti-infos.com",
+            "type": "SUBDOMAIN",
+            "properties": {
+                "name": "suivi.mailings.tahiti-infos.com",
+                "tag": "EMAIL_TRACKING"
+            }
+        },
+        {
+            "id": "http:https://suivi.mailings.tahiti-infos.com:443",
+            "type": "HTTP_SERVICE",
+            "properties": {
+                "url": "https://suivi.mailings.tahiti-infos.com:443",
+                "status_code": 200,
+                "technologies": [
+                    "Express"
+                ]
+            }
+        }
+    ],
+    "edges": [
+        {
+            "from": "suivi.mailings.tahiti-infos.com",
+            "to": "http:https://suivi.mailings.tahiti-infos.com:443",
+            "relation": "EXPOSES_HTTP"
+        }
+    ]
+}

@@ -1,0 +1,46 @@
+@import "tailwindcss";
+
+:root {
+  --gotham-green: #00ff88;
+  --gotham-dark: #0a0f0d;
+  --gotham-gray: #1a1f1d;
+}
+
+body {
+  background-color: var(--gotham-dark);
+  color: #e0e0e0;
+}
+
+/* Cytoscape Graph Styling */
+.graph-container {
+  width: 100%;
+  height: 600px;
+  background: var(--gotham-gray);
+  border-radius: 8px;
+  border: 1px solid #333;
+}
+
+/* Node type colors */
+.node-domain { background-color: #3b82f6; }
+.node-subdomain { background-color: #06b6d4; }
+.node-ip { background-color: #f59e0b; }
+.node-endpoint { background-color: #10b981; }
+.node-vulnerability { background-color: #ef4444; }
+.node-technology { background-color: #8b5cf6; }
+
+/* Risk level indicators */
+.risk-critical { color: #ef4444; }
+.risk-high { color: #f97316; }
+.risk-medium { color: #f59e0b; }
+.risk-low { color: #22c55e; }
+.risk-info { color: #3b82f6; }
+
+/* Animation for live updates */
+@keyframes pulse-green {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.live-indicator {
+  animation: pulse-green 2s infinite;
+}

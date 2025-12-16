@@ -1,0 +1,37 @@
+# Core API framework
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+pydantic>=2.5.0
+
+# HTTP client
+httpx>=0.26.0
+requests>=2.31.0
+
+# Kafka
+aiokafka>=0.10.0
+
+# Database
+redis>=5.0.0
+aiosqlite>=0.21.0
+
+# Telemetry (CrewAI compatible versions)
+opentelemetry-api>=1.30.0
+opentelemetry-sdk>=1.30.0
+opentelemetry-instrumentation-fastapi>=0.51b0
+
+# Logging
+structlog>=24.1.0
+
+# Config
+pyyaml>=6.0
+
+# CrewAI + LLM
+crewai>=0.80.0
+langchain>=0.3.0
+langchain-openai>=0.2.0
+langchain-ollama>=0.2.0
+langchain-community>=0.3.0
+openai>=1.52.0
+
+# Tools dependencies
+dnspython>=2.4.0

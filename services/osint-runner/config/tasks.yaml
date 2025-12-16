@@ -1,0 +1,106 @@
+# OSINT Runner Tasks Configuration
+
+smart_enumeration_task:
+  description: >
+    Perform advanced passive reconnaissance on {target_domain}.
+
+    Operational steps:
+    1. Think about common subdomain patterns for corporate environments:
+       - www, api, app, dev, staging, test, beta, admin, portal
+       - mail, smtp, imap, pop, webmail
+       - vpn, remote, gateway, proxy
+       - cdn, static, assets, media, images
+       - db, database, mysql, postgres, redis
+       - auth, login, sso, oauth, id
+       - docs, wiki, help, support
+       - git, gitlab, github, bitbucket, jenkins, ci
+       - monitor, grafana, prometheus, kibana, elastic
+    2. Generate likely subdomains for this specific domain based on its industry
+    3. Return a JSON array of subdomain strings
+
+  expected_output: >
+    A STRICT JSON array containing discovered/likely subdomains.
+    Example: ["www.target.com", "api.target.com", "dev.target.com"]
+    DO NOT summarize, return ONLY the JSON array.
+
+  agent: pathfinder
+
+
+context_analysis_task:
+  description: >
+    Analyze the discovered subdomains and prioritize them.
+
+    CRITICAL ANTI-HALLUCINATION RULES:
+    1. You MUST NOT invent any subdomain. Use STRICTLY the ones provided.
+    2. If the list is empty, state it explicitly.
+
+    For each subdomain:
+      1. Infer its context (e.g., STAGING, PROD, VPN, ADMIN, API, DEV)
+      2. Assign an attack priority (1-10, where 10 = highest value)
+      3. Suggest a technical category (e.g., APP_BACKEND, AUTH_PORTAL, STATIC_ASSET)
+      4. Explain why it's interesting for security testing
+
+  expected_output: >
+    STRICT JSON array.
+    Example:
+    [
+      {
+        "subdomain": "api-dev.target.com",
+        "tag": "DEV_API",
+        "priority": 9,
+        "reason": "Exposed development API - likely less hardened",
+        "category": "APP_BACKEND"
+      }
+    ]
+
+  agent: intelligence_analyst
+
+
+dns_enrichment_task:
+  description: >
+    Take the list of prioritized subdomains and resolve their DNS records.
+
+    Steps:
+    1. Extract all 'subdomain' strings from the input
+    2. For each subdomain, identify likely IP addresses (A/AAAA records)
+    3. Note any CNAME chains or interesting TXT records
+    4. Return enriched data with DNS information
+
+  expected_output: >
+    STRICT JSON array with DNS data.
+    Example:
+    [
+      {
+        "subdomain": "api.target.com",
+        "ips": ["1.2.3.4"],
+        "cname": null,
+        "mx": [],
+        "txt": []
+      }
+    ]
+
+  agent: dns_analyst
+
+
+asn_enrichment_task:
+  description: >
+    Take the DNS resolution results and enrich IPs with ASN data.
+
+    Steps:
+    1. Extract all unique IPs from the previous task
+    2. Look up ASN information for each IP
+    3. Identify the hosting provider or organization
+
+  expected_output: >
+    STRICT JSON array with ASN data.
+    Example:
+    [
+      {
+        "ip": "1.2.3.4",
+        "asn": "AS13335",
+        "org": "Cloudflare, Inc.",
+        "country": "US"
+      }
+    ]
+
+  agent: asn_analyst

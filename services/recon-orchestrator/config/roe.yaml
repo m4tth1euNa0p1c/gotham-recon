@@ -1,0 +1,355 @@
+# Rules of Engagement (ROE) Configuration
+# Central policy file for Deep Verification phase
+# Version: 1.0.0 | Deep Verification v3.3
+
+# =====================================================================
+# MODE DEFINITIONS
+# Defines what HTTP methods and behaviors are allowed per execution mode
+# =====================================================================
+modes:
+  STEALTH:
+    description: "Minimal footprint, passive-only with safe read operations"
+    allowed_methods:
+      - GET
+      - HEAD
+      - OPTIONS
+    forbidden_methods:
+      - POST
+      - PUT
+      - PATCH
+      - DELETE
+    allow_body: false
+    allow_redirects: true
+    max_redirects: 3
+    allow_cookies: false
+    user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    rate_limit:
+      requests_per_second: 1
+      burst: 3
+    concurrency: 2
+    timeouts:
+      connect: 10
+      read: 30
+      total: 60
+    retry:
+      max_attempts: 1
+      backoff_factor: 2.0
+
+  BALANCED:
+    description: "Moderate testing with safe POST operations"
+    allowed_methods:
+      - GET
+      - HEAD
+      - OPTIONS
+      - POST  # Safe POST only (read-like operations)
+    forbidden_methods:
+      - PUT
+      - PATCH
+      - DELETE
+    allow_body: true
+    body_constraints:
+      max_size_bytes: 1024
+      content_types:
+        - "application/json"
+        - "application/x-www-form-urlencoded"
+      forbidden_patterns:
+        - "DROP TABLE"
+        - "DELETE FROM"
+        - "'; --"
+        - "<script>"
+    allow_redirects: true
+    max_redirects: 5
+    allow_cookies: true
+    user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    rate_limit:
+      requests_per_second: 5
+      burst: 10
+    concurrency: 5
+    timeouts:
+      connect: 10
+      read: 30
+      total: 120
+    retry:
+      max_attempts: 2
+      backoff_factor: 1.5
+
+  AGGRESSIVE:
+    description: "Full testing capabilities with controlled fuzzing"
+    allowed_methods:
+      - GET
+      - HEAD
+      - OPTIONS
+      - POST
+      - PUT  # With constraints
+      - PATCH  # With constraints
+    forbidden_methods:
+      - DELETE  # Always forbidden by default
+    allow_body: true
+    body_constraints:
+      max_size_bytes: 4096
+      content_types:
+        - "application/json"
+        - "application/x-www-form-urlencoded"
+        - "multipart/form-data"
+        - "text/plain"
+      forbidden_patterns:
+        - "rm -rf"
+        - "format c:"
+        - "; shutdown"
+    allow_redirects: true
+    max_redirects: 10
+    allow_cookies: true
+    user_agent: "GothamRecon/3.3 (+https://github.com/gotham/recon-gotham)"
+    rate_limit:
+      requests_per_second: 20
+      burst: 50
+    concurrency: 10
+    timeouts:
+      connect: 15
+      read: 60
+      total: 300
+    retry:
+      max_attempts: 3
+      backoff_factor: 1.0
+
+# =====================================================================
+# SCOPE RULES
+# Defines what targets are allowed and what must be excluded
+# =====================================================================
+scope:
+  # Domain validation
+  domain_rules:
+    # Must match target domain or its subdomains
+    require_target_match: true
+    # Allow wildcard subdomains
+    allow_subdomains: true
+    # Maximum subdomain depth (e.g., a.b.c.target.com = depth 3)
+    max_subdomain_depth: 5
+
+  # IP range restrictions
+  ip_rules:
+    # Block private ranges by default
+    block_private_ranges: true
+    private_ranges:
+      - "10.0.0.0/8"
+      - "172.16.0.0/12"
+      - "192.168.0.0/16"
+      - "127.0.0.0/8"
+      - "169.254.0.0/16"
+    # Block link-local
+    block_link_local: true
+    # Block multicast
+    block_multicast: true
+
+  # Automatic exclusions (CDN/SaaS providers)
+  auto_exclude_providers:
+    enabled: true
+    providers:
+      - name: "Cloudflare"
+        patterns:
+          - "*.cloudflare.com"
+          - "*.cloudflaressl.com"
+        action: "warn"  # warn, skip, or block
+      - name: "AWS"
+        patterns:
+          - "*.amazonaws.com"
+          - "*.aws.amazon.com"
+          - "s3.*.amazonaws.com"
+        action: "warn"
+      - name: "Google Cloud"
+        patterns:
+          - "*.googleapis.com"
+          - "*.google.com"
+          - "*.gstatic.com"
+        action: "skip"
+      - name: "Azure"
+        patterns:
+          - "*.azure.com"
+          - "*.microsoftonline.com"
+          - "*.windows.net"
+        action: "warn"
+      - name: "Akamai"
+        patterns:
+          - "*.akamai.net"
+          - "*.akamaiedge.net"
+        action: "skip"
+
+  # Path exclusions (never test these)
+  excluded_paths:
+    - "/logout"
+    - "/signout"
+    - "/api/*/delete"
+    - "/api/*/remove"
+    - "/api/*/destroy"
+    - "/admin/*/delete"
+    - "/payment/*"
+    - "/checkout/*"
+    - "/order/*"
+    - "/.well-known/*"
+
+# =====================================================================
+# PHASE LIMITS
+# Resource limits for the Deep Verification phase
+# =====================================================================
+limits:
+  phase:
+    # Maximum duration for the entire verification phase
+    max_duration_seconds: 1800  # 30 minutes
+    # Maximum number of modules to execute
+    max_modules: 100
+    # Maximum number of targets to verify
+    max_targets: 50
+
+  module:
+    # Maximum duration per module execution
+    max_duration_seconds: 60
+    # Maximum requests per module
+    max_requests: 10
+    # Maximum response size to process
+    max_response_bytes: 1048576  # 1 MB
+
+  request:
+    # Per-request timeout
+    timeout_seconds: 30
+    # Maximum body size to send
+    max_body_bytes: 4096
+    # Maximum URL length
+    max_url_length: 2048
+
+# =====================================================================
+# SECURITY CONSTRAINTS
+# Hard limits that cannot be overridden
+# =====================================================================
+security:
+  # Never store these in evidence (redact)
+  sensitive_patterns:
+    - name: "Authorization Header"
+      pattern: "Authorization:\\s*[^\\s]+"
+      redact_to: "Authorization: [REDACTED]"
+    - name: "Cookie"
+      pattern: "Cookie:\\s*[^\\r\\n]+"
+      redact_to: "Cookie: [REDACTED]"
+    - name: "Set-Cookie"
+      pattern: "Set-Cookie:\\s*[^\\r\\n]+"
+      redact_to: "Set-Cookie: [REDACTED]"
+    - name: "API Key"
+      pattern: "(api[_-]?key|apikey)[=:]\\s*['\"]?[a-zA-Z0-9_-]{16,}['\"]?"
+      redact_to: "[API_KEY_REDACTED]"
+    - name: "Bearer Token"
+      pattern: "Bearer\\s+[a-zA-Z0-9._-]+"
+      redact_to: "Bearer [REDACTED]"
+    - name: "JWT"
+      pattern: "eyJ[a-zA-Z0-9_-]*\\.eyJ[a-zA-Z0-9_-]*\\.[a-zA-Z0-9_-]*"
+      redact_to: "[JWT_REDACTED]"
+    - name: "Password"
+      pattern: "(password|passwd|pwd)[=:]\\s*[^\\s&]+"
+      redact_to: "[PASSWORD_REDACTED]"
+
+  # Module execution sandbox
+  sandbox:
+    # Only allow HTTP(S) protocols
+    allowed_protocols:
+      - "http"
+      - "https"
+    # No filesystem access
+    allow_filesystem: false
+    # No network beyond target
+    restrict_to_target: true
+    # No shell execution
+    allow_shell: false
+
+# =====================================================================
+# VULNERABILITY STATUS DEFINITIONS
+# Status progression rules for findings
+# =====================================================================
+vulnerability_statuses:
+  THEORETICAL:
+    description: "Hypothesis generated from heuristics, no active verification"
+    can_promote_to:
+      - "LIKELY"
+      - "CONFIRMED"
+    requires_evidence: false
+
+  LIKELY:
+    description: "Partial evidence supports the hypothesis"
+    can_promote_to:
+      - "CONFIRMED"
+    can_demote_to:
+      - "THEORETICAL"
+      - "FALSE_POSITIVE"
+    requires_evidence: true
+    min_confidence: 0.5
+
+  CONFIRMED:
+    description: "Full evidence chain proves the vulnerability"
+    can_demote_to:
+      - "LIKELY"
+      - "FALSE_POSITIVE"
+    requires_evidence: true
+    min_confidence: 0.8
+    requires_proof_hash: true
+
+  FALSE_POSITIVE:
+    description: "Investigation determined this is not a vulnerability"
+    can_promote_to:
+      - "LIKELY"  # If new evidence emerges
+    requires_evidence: true
+    evidence_type: "negative_proof"
+
+# =====================================================================
+# MODULE CATEGORIES
+# Allowed module types and their constraints
+# =====================================================================
+module_categories:
+  http_probe:
+    description: "Simple HTTP request/response analysis"
+    allowed_in_modes:
+      - STEALTH
+      - BALANCED
+      - AGGRESSIVE
+    max_requests: 3
+
+  header_analysis:
+    description: "HTTP header security analysis"
+    allowed_in_modes:
+      - STEALTH
+      - BALANCED
+      - AGGRESSIVE
+    max_requests: 1
+
+  tech_fingerprint:
+    description: "Technology stack identification"
+    allowed_in_modes:
+      - STEALTH
+      - BALANCED
+      - AGGRESSIVE
+    max_requests: 5
+
+  config_exposure:
+    description: "Check for exposed configuration files"
+    allowed_in_modes:
+      - BALANCED
+      - AGGRESSIVE
+    max_requests: 10
+
+  parameter_test:
+    description: "Safe parameter manipulation testing"
+    allowed_in_modes:
+      - BALANCED
+      - AGGRESSIVE
+    max_requests: 5
+    requires_body: false  # GET params only in BALANCED
+
+  fuzzing:
+    description: "Input fuzzing with safe payloads"
+    allowed_in_modes:
+      - AGGRESSIVE
+    max_requests: 20
+    requires_body: true
+
+  auth_test:
+    description: "Authentication mechanism testing"
+    allowed_in_modes:
+      - AGGRESSIVE
+    max_requests: 10
+    requires_auth_context: true

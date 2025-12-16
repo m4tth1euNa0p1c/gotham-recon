@@ -1,0 +1,45 @@
+{
+  "id": "security-headers-01",
+  "name": "Security Headers Check",
+  "version": "1.0.0",
+  "category": "header_analysis",
+  "target": "{target_url}",
+  "method": "GET",
+  "headers": {},
+  "body": null,
+  "query_params": {},
+  "stop_conditions": [],
+  "timeout": 30,
+  "follow_redirects": true,
+  "max_redirects": 3,
+  "expected_proof": [
+    {
+      "type": "header",
+      "pattern": "^(?!.*X-Frame-Options).*$",
+      "value": null,
+      "description": "Missing X-Frame-Options header indicates potential clickjacking vulnerability"
+    },
+    {
+      "type": "header",
+      "pattern": "^(?!.*Content-Security-Policy).*$",
+      "value": null,
+      "description": "Missing CSP header indicates potential XSS vulnerability"
+    },
+    {
+      "type": "header",
+      "pattern": "^(?!.*X-Content-Type-Options).*$",
+      "value": null,
+      "description": "Missing X-Content-Type-Options allows MIME sniffing"
+    }
+  ],
+  "max_status": "LIKELY",
+  "attack_type": "SECURITY_MISCONFIGURATION",
+  "severity": "LOW",
+  "description": "Checks for missing security headers that could lead to various client-side attacks",
+  "references": [
+    "CWE-693",
+    "https://owasp.org/www-project-secure-headers/"
+  ],
+  "allowed_modes": ["STEALTH", "BALANCED", "AGGRESSIVE"],
+  "requires_auth": false
+}

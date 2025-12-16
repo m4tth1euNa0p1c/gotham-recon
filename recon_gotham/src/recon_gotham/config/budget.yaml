@@ -1,0 +1,111 @@
+# ============================================================================
+# Recon-Gotham V3.0 - Budget Configuration
+# Controls timeouts, limits, concurrency, and resource allocation
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# LLM Budgets
+# ----------------------------------------------------------------------------
+llm:
+  max_tokens_per_call: 4096
+  max_calls_per_phase: 10
+  temperature: 0.3
+  timeout_seconds: 120
+
+# ----------------------------------------------------------------------------
+# Scanner Budgets
+# ----------------------------------------------------------------------------
+scanners:
+  subfinder:
+    timeout: 120
+    max_concurrent: 1
+  httpx:
+    timeout: 30
+    max_concurrent: 10
+    rate_limit: 50  # requests per second
+  nuclei:
+    timeout: 300
+    max_concurrent: 3
+    max_templates: 100
+  ffuf:
+    timeout: 180
+    max_concurrent: 2
+    max_wordlist_size: 10000
+  wayback:
+    timeout: 60
+    max_results: 1000
+
+# ----------------------------------------------------------------------------
+# Concurrency Settings
+# ----------------------------------------------------------------------------
+concurrency:
+  http_max_workers: 10
+  scan_max_workers: 3
+  ingestion_thread: 1  # Always single-threaded for graph safety
+
+# ----------------------------------------------------------------------------
+# Request Settings
+# ----------------------------------------------------------------------------
+requests:
+  timeout: 15
+  retries: 3
+  retry_delay: 1
+  verify_ssl: false
+  user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ReconGotham/3.0"
+
+# ----------------------------------------------------------------------------
+# Target Limits
+# ----------------------------------------------------------------------------
+targets:
+  max_subdomains: 500
+  max_http_services: 200
+  max_endpoints_to_analyze: 100
+  max_endpoints_to_verify: 50
+  max_params_to_fuzz: 30
+
+# ----------------------------------------------------------------------------
+# Risk Thresholds (LOWERED for V3.0 testing)
+# ----------------------------------------------------------------------------
+thresholds:
+  min_risk_for_active_scan: 1
+  min_risk_for_fuzzing: 5
+  min_risk_for_verification: 1
+  min_priority_for_active: 1
+  high_risk_score: 15
+
+# ----------------------------------------------------------------------------
+# Profiles
+# ----------------------------------------------------------------------------
+profiles:
+  stealth:
+    http_max_workers: 3
+    scan_max_workers: 1
+    rate_limit: 10
+    max_endpoints_to_analyze: 20
+    verify_all: false
+    active_verification_enabled: false
+    
+  aggressive:
+    http_max_workers: 15
+    scan_max_workers: 5
+    rate_limit: 100
+    max_endpoints_to_analyze: 100
+    verify_all: true
+    active_verification_enabled: true
+    
+  balanced:
+    http_max_workers: 8
+    scan_max_workers: 3
+    rate_limit: 50
+    max_endpoints_to_analyze: 50
+    verify_all: false
+    active_verification_enabled: true
+
+# ----------------------------------------------------------------------------
+# Cache Settings
+# ----------------------------------------------------------------------------
+cache:
+  enabled: true
+  ttl_hours: 24
+  directory: "cache"
+  max_size_mb: 500

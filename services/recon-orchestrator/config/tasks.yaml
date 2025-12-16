@@ -1,0 +1,508 @@
+smart_enumeration_task:
+  description: >
+    Perform advanced passive reconnaissance on {target_domain}.
+
+    Operational steps:
+    1. Launch the "Pathfinder Subdomain Scanner" (Subfinder Wrapper).
+    2. Use the '-all' mode to maximize passive sources.
+    3. Disable smart filtering ('smart_filter=False') to ensure we capture all assets for this test.
+    4. Limit results to a maximum of 20 items ('limit=20') to avoid overload during debugging.
+    5. If the domain is large, enable recursive mode only when necessary.
+
+  expected_output: >
+    A STRICT JSON report containing the filtered list of discovered subdomains.
+    The output MUST be the EXACT JSON returned by the tool 'subfinder_enum'.
+    DO NOT summarize, do not wrap in markdown code blocks if possible, just return the raw JSON string.
+    CRITICAL:
+    - If the tool says "subdomains": [], you MUST return [].
+    - If the tool returns an error, you MUST return [].
+    - DO NOT INVENT "example.com" or "test.com".
+
+  agent: pathfinder
+
+
+context_analysis_task:
+  description: >
+    Analyze the JSON results provided by Pathfinder.
+
+    CRITICAL ANTI-HALLUCINATION RULES:
+    1. You MUST NOT invent any subdomain. Use STRICTLY the ones provided
+       in the 'subdomains' list.
+    2. If the list is empty or contains no relevant assets, state it explicitly.
+    3. DO NOT guess subdomains that "should" exist (e.g., no 'admin.target.com'
+       unless it appears in the input).
+
+    For each CONFIRMED subdomain:
+      1. Infer its context (e.g., STAGING, PROD, VPN, ADMIN).
+      2. Assign an attack priority (1-10).
+      3. Suggest a technical category (e.g., APP_BACKEND, AUTH_PORTAL, STATIC_ASSET).
+      4. Suggest the next technical action (e.g., 'nuclei_scan', 'httpx_probe').
+
+  expected_output: >
+    STRICT JSON array.
+    Example:
+    [
+      {
+        "subdomain": "api-dev.target.com",
+        "tag": "DEV_API",
+        "priority": 9,
+        "reason": "Exposed development API",
+        "category": "APP_BACKEND",
+        "next_action": "nuclei_scan"
+      }
+    ]
+
+  agent: intelligence_analyst
+
+dns_enrichment_task:
+  description: >
+    You receive a JSON list of subdomains from the previous task.
+
+    Steps:
+    1. Extract all 'subdomain' strings from the input logic.
+    2. CALL the `dns_resolver` tool ONCE with this list of subdomains (List[str]).
+    3. Return the tool's output AS IS (STRICT JSON array).
+
+    Do NOT loop yourself. The tool handles the loop.
+  expected_output: >
+    STRICT JSON array from valid tool output.
+  agent: dns_analyst
+
+asn_enrichment_task:
+  description: >
+    You receive a JSON list of DNS resolution results.
+
+    Steps:
+    1. Extract all unique 'ips' from the previous task output.
+       (Iterate over items, collect 'ips' lists, flatten, deduplicate).
+    2. CALL the `asn_lookup` tool ONCE with this list of IPs (List[str]).
+    3. Return the tool's output AS IS (STRICT JSON array).
+
+    Do NOT loop yourself. The tool handles the loop.
+  expected_output: >
+    STRICT JSON array from valid tool output.
+  agent: asn_analyst
+
+
+tech_fingerprint_task:
+  description: >
+    ROLE: JSON Data Processor.
+    INPUT: A JSON list of subdomains (from Context Analysis).
+    OUTPUT: A JSON array of results.
+
+    LOGIC:
+    1. FILTER: Keep subdomains where (priority >= 1). We want to scan everything for now.
+    2. ACTION: Run `httpx_probe` on filtered subdomains.
+    3. FORMAT: Return the results as a RAW JSON ARRAY.
+
+    CRITICAL INSTRUCTIONS:
+    - DO NOT OUTPUT ANY TEXT, THOUGHTS, OR EXPLANATIONS.
+    - START OUTPUT WITH "[" AND END WITH "]".
+    - IF NO SUBDOMAINS MATCH, RETURN "[]".
+    - YOUR ENTIRE RESPONSE MUST BE VALID JSON PARSABLE BY Python's json.loads().
+
+    Target Structure:
+       [
+         {
+           "subdomain": "string",
+           "priority": int,
+           "tag": "string",
+           "category": "string",
+           "http": {
+             "url": "string",
+             "status_code": int,
+             "technologies": ["string"],
+             "ip": "string"
+           }
+         }
+       ]
+
+  expected_output: >
+    A STRICT JSON array of enriched subdomains with HTTP fingerprint data.
+    NO additional text.
+
+  agent: tech_fingerprinter
+
+
+js_miner_task:
+  description: >
+    You receive a JSON report (result from Tech Fingerprinter).
+
+    Steps:
+    1. Extract the list of HTTP service URLs:
+       - Extract `http.url` for each item where `http.url` != null.
+    2. CHECK: If the list is EMPTY, STOP immediately and return "[]".
+    3. Call the `js_miner` tool with this list of URLs (List[str]).
+    4. Return STRICTLY a JSON array merging all tool results.
+
+    Expected STRICT Format:
+    [
+      {
+        "url": "https://...",
+        "js": {
+          "js_files": ["..."],
+          "endpoints": [
+            { "path": "...", "method": "...", "source_js": "..." }
+          ],
+          "secrets": [
+            { "value": "...", "kind": "...", "source_js": "..." }
+          ]
+        }
+      }
+    ]
+
+    IMPORTANT:
+    - IF NO URLs: Return "[]". DO NOT call the tool with empty list.
+    - NO extra text outside the final JSON output.
+
+  expected_output: >
+    STRICT JSON array containing JS analysis for each URL.
+
+  agent: js_miner
+
+
+planning_task:
+  description: >
+    You receive the current AssetGraph JSON data.
+    Your job is to ACT as the Strategic Planner.
+
+    1. USE the provided context (which contains the Top-K identified paths).
+    2. For each path, ANALYZE why it is interesting.
+    3. PROPOSE the next technical actions relative to the findings.
+
+    POSSIBLE ACTIONS:
+    - 'nuclei_scan': If the subdomain exposes a known tech stack.
+    - 'ffuf_api_fuzz': If an API endpoint is discovered.
+    - 'parameter_mining': If a complex JS file is found.
+    - 'smtp_test': If a Mail Server or MX record is found.
+    - 'dns_audit': For high-value DNS anomalies (e.g. missing DMARC).
+    - 'manual_review': If a Secret is leaked or critical infra found.
+
+    CRITICAL RULES:
+    - Do NOT invent subdomains. Only use the ones in the JSON.
+    - INCLUDE high-value targets (Admin, Mail, Backup, Auth) EVEN IF they have no known HTTP URL.
+    - Return STRICT JSON.
+
+  expected_output: >
+    A STRICT JSON list of actionable attack plans.
+    Example:
+    [
+      {
+        "subdomain": "dev.target.com",
+        "score": 15,
+        "reason": "Development API with Auth JS",
+        "next_actions": ["nuclei_scan", "ffuf_api_fuzz"]
+      }
+    ]
+
+  agent: planner
+
+endpoint_discovery_task:
+  description: >
+    You receive the JSON report from the Tech Fingerprinter (list of active HTTP services).
+
+    Steps:
+    1. Extract active HTTP URLs (e.g. "https://api.target.com").
+    2. Extract unique Domains (e.g. "target.com").
+    3. EXECUTE:
+       - Call `html_crawler` with the list of URLs.
+       - Call `wayback_history` with the list of unique Domains.
+       - Call `robots_check` for each unique Base URL.
+    4. MERGE all results into a single STRICT JSON list.
+
+    EXPECTED OUTPUT RULES:
+    - STRICT JSON or "[]".
+    - IF NO RESULTS: Return "[]".
+    - DO NOT INVENT DATA. DO NOT USE EXAMPLES (e.g. "example.com", "target.com", "/api/v1/users").
+    - ONLY return endpoints verified by the tools.
+    - If the tool says "No results", the list must be empty.
+
+    Expected STRICT Format:
+    [
+      { "path": "/actual/path", "method": "GET", "source": "WAYBACK", "origin": "archive.org" }
+    ]
+
+  expected_output: >
+    STRICT JSON list of endpoints found.
+
+  agent: endpoint_analyst
+
+vuln_scan_task:
+  description: >
+    You receive the Strategic Plan JSON from the Planner.
+
+    Steps:
+    1. FILTER targets where `next_actions` contains 'nuclei_scan' or 'ffuf_api_fuzz'.
+    2. EXECUTE VULNERABILITY SCANS:
+       - If 'nuclei_scan' is suggested: Call `nuclei_scan_tool` on the target URL.
+       - If 'ffuf_api_fuzz' is suggested: Call `ffuf_fuzzer_tool` on the URL (append /FUZZ if needed).
+    3. COLLECT and MERGE all results.
+    4. RETURN a STRICT JSON array of confirmed vulnerabilities.
+
+    Expected STRICT Format:
+    [
+      {
+        "name": "SQL Injection",
+        "severity": "CRITICAL",
+        "url": "https://target.com/api/v1/login",
+        "tool": "nuclei",
+        "description": "..."
+      }
+    ]
+
+    IMPORTANT:
+    - Only scan high-value targets identified by the Planner.
+    - If no vulnerabilities are found, return "[]".
+    - Do NOT output text.
+
+  expected_output: >
+    STRICT JSON list of vulnerabilities found.
+
+  agent: vuln_analyst
+
+param_discovery_task:
+  description: >
+    You receive the list of Endpoints found by the Endpoint Analyst.
+
+    Steps:
+    1. EXTRACT all parameters from URLs (e.g. ?id=1 -> 'id').
+    2. INFER parameters from standard API patterns (e.g. /users/123 -> 'user_id').
+    3. ANALYZE if parameters look vulnerable (e.g. 'redirect', 'file', 'cmd').
+    4. RETURN a STRICT JSON list of discovered parameters.
+
+    EXPECTED OUTPUT RULES:
+    - STRICT JSON or "[]".
+    - DO NOT HALLUCINATE parameters.
+    - DO NOT USE EXAMPLES like "id=1" if not found.
+    - IF NO PARAMS FOUND, RETURN "[]".
+
+    Expected STRICT Format:
+    [
+      { "url": "https://actual.target/page", "param": "debug", "type": "GET", "risk": "INFO" }
+    ]
+
+  expected_output: >
+    STRICT JSON list of parameters.
+
+  agent: param_hunter
+
+exploit_chain_task:
+  description: >
+    You receive the JSON list of Confirmed Vulnerabilities and Parameters.
+
+    Steps:
+    1. ANALYZE the vulnerabilities.
+    2. CHECK for chaining opportunities (e.g. CSRF -> XSS -> Admin Takeover).
+    3. DRAFT an exploitation plan for each chain.
+    4. RETURN a STRICT JSON list of attack chains.
+
+    Expected STRICT Format:
+    [
+      {
+        "vulnerability": "Reflected XSS",
+        "path": "/search",
+        "payload": "<script>alert(1)</script>",
+        "chain": "Session Hijacking via Cross-Site Scripting"
+      }
+    ]
+
+  expected_output: >
+    STRICT JSON list of exploitation chains.
+
+  agent: exploit_lab
+
+dynamic_script_task:
+  description: >
+    You receive a 'Script Specification' JSON containing:
+    - target_url: The URL to target.
+    - objective: What data to extract (e.g. "Extract all JSON inside <script> tags").
+    - constraints: "Use only requests and bs4".
+
+    Steps:
+    1. ANALYZE the objective.
+    2. WRITE a functional Python script.
+       - It MUST accept the target URL as an argument or variable.
+       - It MUST print the result as STRICT JSON to stdout.
+    3. RETURN the script code wrapped in a JSON object.
+
+    Expected STRICT Format:
+    {
+      "script_code": "import requests...",
+      "description": "Script to parse inline JSON"
+    }
+
+  expected_output: >
+    STRICT JSON containing the generated python code.
+
+  agent: code_smith
+
+org_profiling_task:
+  description: >
+    Identify the target organization's details.
+
+    Steps:
+    1. Input: Target Domain.
+    2. Action: Use search tools or internal knowledge to identify Organization Name, Industry, and Country.
+    3. Action: Identify known subsidiaries or brands.
+    4. Output: STRICT JSON.
+
+    Expected Format:
+    {
+      "name": "Wayne Enterprises",
+      "sector": "Defense",
+      "country": "US",
+      "brands": [
+        {"name": "WayneTech", "domain": "tech.wayne.com"}
+      ]
+    }
+
+  expected_output: >
+    STRICT JSON organization profile.
+    CRITICAL:
+    - DO NOT use example data like "Target Corp", "Acme", "Wayne Enterprises".
+    - ONLY return if you find real data linked to {target_domain}.
+    - If nothing found, return "{}".
+
+  agent: org_profiler
+
+saas_enumeration_task:
+  description: >
+    Identify SaaS usage via passive signals.
+
+    Steps:
+    1. Input: DNS Records and HTTP Headers (from Asset Graph).
+    2. Analyze SPF/MX for providers (e.g., 'include:spf.protection.outlook.com', 'google.com').
+    3. Analyze HTTP headers for SaaS signatures (e.g., 'X-Powered-By: Shopify').
+    4. Output: STRICT JSON list.
+
+    Expected Format:
+    [
+      {"name": "Microsoft 365", "category": "Email/Collab", "confidence": "High"},
+      {"name": "Shopify", "category": "E-commerce", "confidence": "High"}
+    ]
+
+  expected_output: >
+    STRICT JSON list of SaaS apps.
+    CRITICAL:
+    - DO NOT HALLUCINATE. Only infer from actual DNS or Headers.
+    - DO NOT LIST generic examples.
+
+  agent: saas_intel
+
+repo_mining_task:
+  description: >
+    Find public code repositories.
+
+    Steps:
+    1. Input: Organization Name and Domain.
+    2. Action: Search GitHub/GitLab for matching orgs or repos.
+    3. Output: STRICT JSON list.
+
+    Expected Format:
+    [
+      {"url": "https://github.com/wayne-ent/internal-tools", "platform": "github"}
+    ]
+
+  expected_output: >
+    STRICT JSON list of repositories.
+    CRITICAL:
+    - URLs MUST contain the target name.
+    - DO NOT return example.com or unknown repos.
+
+  agent: code_intel
+
+endpoint_intel_task:
+  description: >
+    You will receive a JSON array of endpoints discovered on {target_domain}.
+    Each endpoint has pre-computed heuristic values that you must confirm or adjust.
+
+    YOUR MISSION:
+    1. CONFIRM or ADJUST the 'category' (API, ADMIN, AUTH, PUBLIC, STATIC, LEGACY, HEALTHCHECK).
+    2. CONFIRM or ADJUST the 'likelihood_score' (0-10) and 'impact_score' (0-10).
+    3. COMPUTE the 'risk_score' (0-100) based on likelihood x impact.
+    4. SET 'auth_required' (true/false) if you can deduce it.
+    5. SET 'tech_stack_hint' if identifiable (e.g., "PHP", "Rails", "Node").
+    6. PROPOSE 0-3 attack hypotheses for high-risk endpoints.
+
+    CRITICAL CONSTRAINTS:
+    - You MUST NOT invent new endpoints or domains.
+    - You ONLY enrich the endpoints provided in the input.
+    - The target domain is {target_domain} - reject anything outside scope.
+    - Maximum 3 hypotheses per endpoint.
+    - Scores must be: likelihood 0-10, impact 0-10, risk 0-100.
+    - Confidence for hypotheses must be 0.0-1.0, priority 1-5.
+
+    ATTACK_TYPE VALUES:
+    XXE, SQLI, XSS, IDOR, BOLA, AUTH_BYPASS, RATE_LIMIT, RCE, SSRF, LFI, RFI, CSRF, OPEN_REDIRECT, INFO_DISCLOSURE
+
+  expected_output: >
+    STRICT JSON object with this structure (no preamble, no markdown):
+    {
+      "endpoints": [
+        {
+          "endpoint_id": "endpoint:http:https://example.fr/admin/login",
+          "category": "ADMIN",
+          "likelihood_score": 7,
+          "impact_score": 9,
+          "risk_score": 63,
+          "auth_required": true,
+          "tech_stack_hint": "PHP",
+          "parameters": [
+            {"name": "id", "location": "query", "datatype_hint": "id", "sensitivity": "MEDIUM", "is_critical": false}
+          ],
+          "hypotheses": [
+            {"title": "Credential stuffing on admin login", "attack_type": "AUTH_BYPASS", "confidence": 0.7, "priority": 4}
+          ]
+        }
+      ]
+    }
+
+  agent: endpoint_intel
+
+# P0.6: Reflection task for result validation and enrichment
+reflection_task:
+  description: >
+    You receive tool execution results that need validation and potential enrichment.
+
+    YOUR MISSION:
+    1. ANALYZE the tool results for completeness (check if expected data is present)
+    2. IDENTIFY gaps - missing data, failed probes, incomplete coverage
+    3. VALIDATE consistency - ensure data from different tools doesn't contradict
+    4. PROPOSE enrichment actions - generate investigation scripts when needed
+
+    TOOL-SPECIFIC ANALYSIS:
+    - Subfinder: Check subdomain count (expect 10-100 for most domains)
+    - HTTPX: Check for failed probes, missing tech detection
+    - Wayback: Look for interesting historical endpoints (admin, api, config)
+    - DNS: Identify unresolved domains, shared IPs patterns
+
+    ENRICHMENT ACTIONS (when gaps found):
+    - generate_script: Create Python investigation script
+    - retry_with_delay: Tool may have been rate-limited
+    - try_alternative_sources: Use different tool for same objective
+    - validate_manually: Flag for human review
+
+    INPUT FORMAT:
+    {
+      "tool_name": "subfinder",
+      "result": {...},
+      "context": {"target_domain": "example.com"}
+    }
+
+  expected_output: >
+    STRICT JSON with validation results and enrichment recommendations:
+    {
+      "valid": true,
+      "completeness_score": 0.75,
+      "issues": [
+        {"type": "low_count", "severity": "warning", "message": "Only 5 subdomains found"}
+      ],
+      "enrichment_opportunities": [
+        {"type": "dns_bruteforce", "reason": "Expand subdomain coverage"}
+      ],
+      "suggested_actions": [
+        {"action": "generate_script", "script_type": "dns_bruteforce", "targets": ["example.com"]}
+      ]
+    }
+
+  agent: reflector_agent

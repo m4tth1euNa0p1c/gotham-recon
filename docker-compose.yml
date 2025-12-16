@@ -1,0 +1,384 @@
+version: '3.8'
+
+services:
+  # ============================================
+  # INFRASTRUCTURE
+  # ============================================
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: gotham
+      POSTGRES_PASSWORD: gotham_secret
+      POSTGRES_DB: gotham_recon
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U gotham" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    ports:
+      - "9092:9092"
+    depends_on:
+      - zookeeper
+    healthcheck:
+      test: [ "CMD-SHELL", "kafka-topics --bootstrap-server localhost:9092 --list" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    ports:
+      - "9200:9200"
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -s http://localhost:9200/_cluster/health | grep -q status" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # ============================================
+  # CORE SERVICES
+  # ============================================
+
+  graph-service:
+    build: ./services/graph-service
+    ports:
+      - "8001:8001"
+    environment:
+      - POSTGRES_URL=postgresql://gotham:gotham_secret@postgres:5432/gotham_recon
+      - REDIS_URL=redis://redis:6379
+      - KAFKA_BROKERS=kafka:9092
+      - DATABASE_PATH=/data/gotham.db
+    volumes:
+      - gotham_data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8001/health')\"" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  recon-orchestrator:
+    build: ./services/recon-orchestrator
+    ports:
+      - "8000:8000"
+    environment:
+      - GRAPH_SERVICE_URL=http://graph-service:8001
+      - REDIS_URL=redis://redis:6379
+      - KAFKA_BROKERS=kafka:9092
+      - OSINT_RUNNER_URL=http://osint-runner:8002
+      - ACTIVE_RECON_URL=http://active-recon:8003
+      - ENDPOINT_INTEL_URL=http://endpoint-intel:8004
+      - VERIFICATION_URL=http://verification:8005
+      - REPORTER_URL=http://reporter:8006
+      - PLANNER_URL=http://planner:8007
+      - DATABASE_PATH=/data/gotham.db
+      - LLM_PROVIDER=openai
+      - MODEL_NAME=gpt-4o-mini
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - CREWAI_DISABLE_TELEMETRY=true
+    volumes:
+      - gotham_data:/data
+    depends_on:
+      - graph-service
+      - redis
+    healthcheck:
+      test: [ "CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\"" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  bff-gateway:
+    build: ./services/bff-gateway
+    ports:
+      - "8080:8080"
+    environment:
+      - ORCHESTRATOR_URL=http://recon-orchestrator:8000
+      - GRAPH_SERVICE_URL=http://graph-service:8001
+      - REDIS_URL=redis://redis:6379
+      - KAFKA_BROKERS=kafka:9092
+    depends_on:
+      - recon-orchestrator
+      - graph-service
+    healthcheck:
+      test: [ "CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8080/health')\"" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  scanner-proxy:
+    build: ./services/scanner-proxy
+    ports:
+      - "50051:50051"
+      - "8051:8051"
+    environment:
+      - REDIS_URL=redis://redis:6379
+    volumes:
+      - scanner_cache:/app/cache
+    depends_on:
+      - redis
+    healthcheck:
+      test: [ "CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8051/health')\"" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ============================================
+  # PIPELINE RUNNERS
+  # ============================================
+
+  osint-runner:
+    build: ./services/osint-runner
+    ports:
+      - "8002:8002"
+    environment:
+      - GRAPH_SERVICE_URL=http://graph-service:8001
+      - SCANNER_PROXY_URL=scanner-proxy:50051
+      - KAFKA_BROKERS=kafka:9092
+      - LLM_PROVIDER=openai
+      - MODEL_NAME=gpt-4o-mini
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      - graph-service
+      - scanner-proxy
+    healthcheck:
+      test: [ "CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8002/health')\"" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  active-recon:
+    build: ./services/active-recon
+    ports:
+      - "8003:8003"
+    environment:
+      - GRAPH_SERVICE_URL=http://graph-service:8001
+      - SCANNER_PROXY_URL=scanner-proxy:50051
+      - KAFKA_BROKERS=kafka:9092
+      - LLM_PROVIDER=openai
+      - MODEL_NAME=gpt-4o-mini
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      - graph-service
+      - scanner-proxy
+    healthcheck:
+      test: [ "CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8003/health')\"" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  endpoint-intel:
+    build: ./services/endpoint-intel
+    ports:
+      - "8004:8004"
+    environment:
+      - GRAPH_SERVICE_URL=http://graph-service:8001
+      - KAFKA_BROKERS=kafka:9092
+      - LLM_PROVIDER=openai
+      - MODEL_NAME=gpt-4o-mini
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    depends_on:
+      - graph-service
+    healthcheck:
+      test: [ "CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8004/health')\"" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  verification:
+    build: ./services/verification
+    ports:
+      - "8005:8005"
+    environment:
+      - GRAPH_SERVICE_URL=http://graph-service:8001
+      - SCANNER_PROXY_URL=scanner-proxy:50051
+      - KAFKA_BROKERS=kafka:9092
+      - LLM_PROVIDER=openai
+      - MODEL_NAME=gpt-4o-mini
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    depends_on:
+      - graph-service
+      - scanner-proxy
+    healthcheck:
+      test: [ "CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8005/health')\"" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  reporter:
+    build: ./services/reporter
+    ports:
+      - "8006:8006"
+    environment:
+      - GRAPH_SERVICE_URL=http://graph-service:8001
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+    volumes:
+      - reports:/app/reports
+    depends_on:
+      - graph-service
+      - elasticsearch
+    healthcheck:
+      test: [ "CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8006/health')\"" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  planner:
+    build: ./services/planner
+    ports:
+      - "8007:8007"
+    environment:
+      - GRAPH_SERVICE_URL=http://graph-service:8001
+      - REDIS_URL=redis://redis:6379
+      - LLM_PROVIDER=openai
+      - MODEL_NAME=gpt-4o-mini
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    depends_on:
+      - graph-service
+      - redis
+    healthcheck:
+      test: [ "CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8007/health')\"" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ============================================
+  # FRONTEND
+  # ============================================
+
+  gotham-ui:
+    build: ./gotham-ui
+    ports:
+      - "3000:3000"
+    environment:
+      # URLs must be accessible from the browser (host machine), not Docker internal
+      - NEXT_PUBLIC_BFF_URL=http://localhost:8080
+      - NEXT_PUBLIC_GRAPHQL_URL=http://localhost:8080/graphql
+      - NEXT_PUBLIC_GRAPHQL_WS_URL=ws://localhost:8080/graphql
+      - NEXT_PUBLIC_GRAPH_WS_URL=ws://localhost:8001
+      - NEXT_PUBLIC_ORCHESTRATOR_WS_URL=ws://localhost:8000
+    depends_on:
+      - bff-gateway
+      - recon-orchestrator
+
+  # Development mode with hot-reload
+  gotham-ui-dev:
+    build:
+      context: ./gotham-ui
+      dockerfile: Dockerfile.dev
+    ports:
+      - "3003:3000"
+    environment:
+      # URLs must be accessible from the browser (host machine), not Docker internal
+      - NEXT_PUBLIC_BFF_URL=http://localhost:8080
+      - NEXT_PUBLIC_GRAPHQL_URL=http://localhost:8080/graphql
+      - NEXT_PUBLIC_GRAPHQL_WS_URL=ws://localhost:8080/graphql
+      - NEXT_PUBLIC_GRAPH_WS_URL=ws://localhost:8001
+      - NEXT_PUBLIC_ORCHESTRATOR_WS_URL=ws://localhost:8000
+      - WATCHPACK_POLLING=true
+    volumes:
+      - ./gotham-ui/src:/app/src
+      - ./gotham-ui/public:/app/public
+    depends_on:
+      - bff-gateway
+      - recon-orchestrator
+    profiles:
+      - dev
+
+  # ============================================
+  # MONITORING (Optional)
+  # ============================================
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.52
+    ports:
+      - "16686:16686"
+      - "14268:14268"
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+
+  grafana:
+    image: grafana/grafana:10.2.0
+    ports:
+      - "3002:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=gotham
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./infra/grafana/dashboards:/etc/grafana/provisioning/dashboards
+    depends_on:
+      - prometheus
+
+volumes:
+  postgres_data:
+  redis_data:
+  elasticsearch_data:
+  scanner_cache:
+  reports:
+  prometheus_data:
+  grafana_data:
+  gotham_data:
+
+
+networks:
+  default:
+    name: gotham-network

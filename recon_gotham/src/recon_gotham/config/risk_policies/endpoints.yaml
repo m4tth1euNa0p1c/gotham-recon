@@ -1,0 +1,123 @@
+# Phase 23: Risk Policy Configuration for Endpoints
+# This file defines scoring weights and formulas for endpoint risk assessment
+
+pre_score_weights:
+  category_admin: 10
+  category_auth: 10
+  category_api: 8
+  legacy_extension: 4
+  has_parameters: 3
+  historical_wayback: 3
+
+likelihood_factors:
+  external_exposure: 3
+  no_auth: 3
+  sensitive_pattern_in_path: 2
+  historical_endpoint: 2
+  state_changing_method: 2
+
+impact_factors:
+  token_param: 4
+  id_param: 3
+  admin_or_auth_endpoint: 4
+  financial_or_personal_data_hint: 4
+  has_critical_param: 3
+
+risk_formula:
+  mode: "weighted_max"  # Options: "weighted_max", "matrix", "additive"
+  likelihood_weight: 0.6
+  impact_weight: 0.8
+  max_risk: 100
+  min_risk: 0
+
+# Category patterns for heuristic classification
+category_patterns:
+  API:
+    - "/api/"
+    - "/api_"
+    - "/rest/"
+    - "/graphql"
+    - "/v1/"
+    - "/v2/"
+    - "/v3/"
+  ADMIN:
+    - "/admin"
+    - "/portal"
+    - "/console"
+    - "/dashboard"
+    - "/manage"
+    - "/backend"
+  AUTH:
+    - "/auth"
+    - "/login"
+    - "/logout"
+    - "/sso"
+    - "/oauth"
+    - "/signin"
+    - "/signup"
+    - "/register"
+    - "/password"
+  LEGACY:
+    extensions:
+      - ".php"
+      - ".asp"
+      - ".aspx"
+      - ".jsp"
+      - ".cgi"
+      - ".pl"
+      - ".swf"
+  HEALTHCHECK:
+    - "/health"
+    - "/ping"
+    - "/status"
+    - "/_health"
+  STATIC:
+    extensions:
+      - ".css"
+      - ".js"
+      - ".png"
+      - ".jpg"
+      - ".gif"
+      - ".ico"
+      - ".woff"
+      - ".woff2"
+
+# Sensitive parameter patterns
+sensitive_params:
+  high:
+    - "token"
+    - "key"
+    - "secret"
+    - "password"
+    - "pwd"
+    - "auth"
+    - "session"
+    - "api_key"
+    - "apikey"
+    - "access_token"
+  medium:
+    - "id"
+    - "user_id"
+    - "account_id"
+    - "uid"
+    - "email"
+    - "username"
+    - "phone"
+  low:
+    - "page"
+    - "limit"
+    - "offset"
+    - "sort"
+    - "order"
+    - "format"
+
+# ID-based access patterns (for IDOR detection)
+id_patterns:
+  - "/{id}"
+  - "/{user_id}"
+  - "/{account_id}"
+  - "?id="
+  - "?user_id="
+  - "?uid="
+  - "/users/{id}"
+  - "/accounts/{id}"

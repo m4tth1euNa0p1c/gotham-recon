@@ -1,0 +1,1869 @@
+openapi: 3.1.0
+info:
+  title: Gotham Recon - Full Infrastructure API
+  description: |
+    Complete API documentation for the Gotham Recon security reconnaissance platform.
+
+    ## Architecture Overview
+    - **Graph Service** (8001): CQRS Read/Write for Asset Graph
+    - **BFF Gateway** (8080): GraphQL API Gateway with real-time subscriptions
+    - **Recon Orchestrator** (8000): Mission coordination and workflow management
+    - **OSINT Runner** (8002): Phase 1 - Passive reconnaissance
+    - **Active Recon** (8003): Phase 3 - HTTP probing and crawling
+    - **Endpoint Intel** (8004): Phase 4 - Endpoint enrichment
+    - **Verification** (8005): Phase 5 - Security testing
+    - **Reporter** (8006): Phase 6 - Report generation
+    - **Planner** (8007): Attack path scoring
+    - **Scanner Proxy** (8051): gRPC interface for security tools
+
+    ## Real-time Communication
+    - WebSocket: Graph updates, Mission logs
+    - SSE: Event streaming
+    - GraphQL Subscriptions: Real-time data updates
+  version: 1.0.0
+  contact:
+    name: Gotham Recon Team
+  license:
+    name: MIT
+
+servers:
+  - url: http://localhost:8001
+    description: Graph Service
+  - url: http://localhost:8080
+    description: BFF Gateway
+  - url: http://localhost:8000
+    description: Recon Orchestrator
+  - url: http://localhost:8002
+    description: OSINT Runner
+  - url: http://localhost:8003
+    description: Active Recon
+  - url: http://localhost:8004
+    description: Endpoint Intel
+  - url: http://localhost:8005
+    description: Verification
+  - url: http://localhost:8006
+    description: Reporter
+  - url: http://localhost:8007
+    description: Planner
+  - url: http://localhost:8051
+    description: Scanner Proxy (HTTP)
+
+tags:
+  - name: Graph Service
+    description: CQRS Read/Write for Asset Graph (Port 8001)
+  - name: BFF Gateway
+    description: GraphQL API Gateway (Port 8080)
+  - name: Orchestrator
+    description: Mission coordination (Port 8000)
+  - name: OSINT Runner
+    description: Phase 1 - Passive reconnaissance (Port 8002)
+  - name: Active Recon
+    description: Phase 3 - HTTP probing (Port 8003)
+  - name: Endpoint Intel
+    description: Phase 4 - Endpoint enrichment (Port 8004)
+  - name: Verification
+    description: Phase 5 - Security testing (Port 8005)
+  - name: Reporter
+    description: Phase 6 - Report generation (Port 8006)
+  - name: Planner
+    description: Attack path scoring (Port 8007)
+  - name: Scanner Proxy
+    description: gRPC tool interface (Port 8051)
+
+paths:
+  # ============================================
+  # GRAPH SERVICE (Port 8001)
+  # ============================================
+  /health:
+    get:
+      tags: [Graph Service, BFF Gateway, Orchestrator, OSINT Runner, Active Recon, Endpoint Intel, Verification, Reporter, Planner, Scanner Proxy]
+      summary: Health check
+      description: Returns health status of the service
+      operationId: healthCheck
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /status:
+    get:
+      tags: [OSINT Runner, Active Recon, Endpoint Intel, Verification, Planner]
+      summary: Service status (debug)
+      description: Returns service-specific status/configuration information.
+      operationId: statusCheck
+      responses:
+        '200':
+          description: Service status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusResponse'
+
+  /api/v1/nodes:
+    post:
+      tags: [Graph Service]
+      summary: Create single node
+      description: Create a new node in the asset graph
+      operationId: createNode
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NodeCreate'
+      responses:
+        '201':
+          description: Node created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NodeResponse'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    get:
+      tags: [Graph Service]
+      summary: List nodes
+      description: List nodes with optional mission_id/type filters.
+      operationId: listNodes
+      parameters:
+        - name: mission_id
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: type
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/NodeType'
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 1000
+      responses:
+        '200':
+          description: Node list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NodeQueryResponse'
+
+  /api/v1/nodes/{node_id}:
+    get:
+      tags: [Graph Service]
+      summary: Get node by ID
+      operationId: getNode
+      parameters:
+        - name: node_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Node found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NodeResponse'
+        '404':
+          description: Node not found
+    put:
+      tags: [Graph Service]
+      summary: Update node properties
+      operationId: updateNode
+      parameters:
+        - name: node_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NodeUpdate'
+      responses:
+        '200':
+          description: Node updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NodeResponse'
+    delete:
+      tags: [Graph Service]
+      summary: Delete a node
+      operationId: deleteNode
+      parameters:
+        - name: node_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Node deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  node_id:
+                    type: string
+
+  /api/v1/nodes/query:
+    post:
+      tags: [Graph Service]
+      summary: Query nodes with filters
+      operationId: queryNodes
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GraphQuery'
+      responses:
+        '200':
+          description: Nodes matching query
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NodeQueryResponse'
+
+  /api/v1/nodes/batch:
+    post:
+      tags: [Graph Service]
+      summary: Create multiple nodes
+      operationId: createNodesBatch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/components/schemas/NodeCreate'
+      responses:
+        '201':
+          description: Nodes created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  created:
+                    type: integer
+                  nodes:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/NodeResponse'
+
+  /api/v1/edges:
+    post:
+      tags: [Graph Service]
+      summary: Create edge between nodes
+      operationId: createEdge
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EdgeCreate'
+      responses:
+        '201':
+          description: Edge created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  edge:
+                    $ref: '#/components/schemas/EdgeResponse'
+
+  /api/v1/edges/batch:
+    post:
+      tags: [Graph Service]
+      summary: Create multiple edges
+      operationId: createEdgesBatch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/components/schemas/EdgeCreate'
+      responses:
+        '201':
+          description: Edges created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  created:
+                    type: integer
+                  edges:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/EdgeResponse'
+
+  # P0.4: Atomic batch upsert (v3.1)
+  /api/v1/graph/batchUpsert:
+    post:
+      tags: [Graph Service]
+      summary: Atomic batch upsert of nodes and edges
+      description: |
+        P0.4: Creates/updates nodes and edges in a single atomic transaction.
+        - Nodes: INSERT OR REPLACE (upsert)
+        - Edges: INSERT OR IGNORE with deterministic IDs (idempotent)
+        - All-or-nothing: if DB fails, in-memory state is not modified
+      operationId: batchUpsertGraph
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mission_id]
+              properties:
+                mission_id:
+                  type: string
+                  description: Mission ID for all nodes/edges
+                nodes:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/NodeCreate'
+                edges:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/EdgeCreate'
+      responses:
+        '200':
+          description: Batch upsert successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [success, partial]
+                  nodes_created:
+                    type: integer
+                  edges_created:
+                    type: integer
+                  nodes:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/NodeResponse'
+                  edges:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/EdgeResponse'
+                  errors:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        type:
+                          type: string
+                        index:
+                          type: integer
+                        error:
+                          type: string
+        '500':
+          description: Batch upsert failed (DB error, no in-memory changes)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
+
+  /api/v1/missions/{mission_id}/edges:
+    get:
+      tags: [Graph Service]
+      summary: Get all edges for mission
+      operationId: getMissionEdges
+      parameters:
+        - name: mission_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Mission edges
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  edges:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/EdgeResponse'
+                  total:
+                    type: integer
+
+  /api/v1/missions/{mission_id}/stats:
+    get:
+      tags: [Graph Service]
+      summary: Get graph statistics
+      operationId: getGraphStats
+      parameters:
+        - name: mission_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Graph statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GraphStats'
+
+  /api/v1/missions/{mission_id}/export:
+    get:
+      tags: [Graph Service]
+      summary: Export full graph as JSON
+      operationId: exportGraph
+      parameters:
+        - name: mission_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Full graph export
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GraphExport'
+
+  /api/v1/layouts/{mission_id}:
+    post:
+      tags: [Graph Service]
+      summary: Save workflow layout
+      operationId: saveLayout
+      parameters:
+        - name: mission_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LayoutSave'
+      responses:
+        '200':
+          description: Layout saved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  mission_id:
+                    type: string
+    get:
+      tags: [Graph Service]
+      summary: Get workflow layout
+      operationId: getLayout
+      parameters:
+        - name: mission_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Layout data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LayoutResponse'
+        '404':
+          description: No layout saved
+
+  /api/v1/workflow/query:
+    post:
+      tags: [Graph Service]
+      summary: Query workflow nodes
+      operationId: queryWorkflow
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkflowQuery'
+      responses:
+        '200':
+          description: Workflow nodes and edges
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowQueryResponse'
+
+  # ============================================
+  # BFF GATEWAY (Port 8080)
+  # ============================================
+  /graphql:
+    post:
+      tags: [BFF Gateway]
+      summary: GraphQL endpoint
+      description: |
+        GraphQL endpoint supporting queries, mutations, and subscriptions.
+
+        ## Queries
+        - `mission(id: String!)`: Get mission by ID
+        - `missions(limit: Int, offset: Int)`: List missions
+        - `nodes(mission_id: String!, filter: NodeFilter, limit: Int)`: Get nodes
+        - `edges(mission_id: String!)`: Get edges
+        - `graph_stats(mission_id: String!)`: Get graph statistics
+        - `attack_paths(mission_id: String!, top: Int)`: Get attack paths
+        - `workflow_nodes(mission_id: String!, types: [NodeType])`: Get workflow nodes
+        - `workflow_layout(mission_id: String!)`: Get workflow layout
+
+        ## Mutations
+        - `start_mission(input: MissionInput!)`: Start new mission
+        - `cancel_mission(id: String!)`: Cancel running mission
+        - `save_workflow_layout(...)`: Save workflow layout
+
+        ## Subscriptions
+        - `graph_events(run_id: String!)`: Real-time graph events
+        - `logs(run_id: String!)`: Real-time mission logs
+      operationId: graphql
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GraphQLRequest'
+      responses:
+        '200':
+          description: GraphQL response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GraphQLResponse'
+
+  /api/v1/debug/subscriptions:
+    get:
+      tags: [BFF Gateway]
+      summary: Debug active subscriptions
+      description: Returns the number of active SSE/WebSocket subscribers per run_id.
+      operationId: debugSubscriptions
+      responses:
+        '200':
+          description: Active subscription counts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DebugSubscriptionsResponse'
+
+  /api/v1/sse/events/{run_id}:
+    get:
+      tags: [BFF Gateway]
+      summary: Server-Sent Events for graph updates
+      description: |
+        P0.5: SSE endpoint with reconnection support.
+        - Supports Last-Event-ID header OR lastEventId query param
+        - On reconnect with lastEventId: replays missed events from ring buffer
+        - On first connect: sends SNAPSHOT event with current graph state
+        - Events include unique `id:` field for reconnection tracking
+      operationId: sseEvents
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: lastEventId
+          in: query
+          required: false
+          description: P0.5 - Last received event ID for reconnection replay
+          schema:
+            type: string
+        - name: Last-Event-ID
+          in: header
+          required: false
+          description: Standard SSE header for reconnection (alternative to query param)
+          schema:
+            type: string
+      responses:
+        '200':
+          description: SSE event stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+              example: |
+                id: evt_123_a1b2c3d4
+                data: {"event_type":"NODE_ADDED","payload":{"node":{"id":"subdomain:www.example.com"}}}
+
+  # P0.5: SSE Snapshot endpoint (v3.1)
+  /api/v1/sse/snapshot/{run_id}:
+    get:
+      tags: [BFF Gateway]
+      summary: Get current graph snapshot and ring buffer status
+      description: |
+        P0.5: Returns the current graph state and ring buffer information.
+        Use this to initialize UI state or debug reconnection issues.
+      operationId: getSseSnapshot
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Graph snapshot with ring buffer status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  mission_id:
+                    type: string
+                  snapshot:
+                    type: object
+                    properties:
+                      nodes:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/NodeResponse'
+                      edges:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/EdgeResponse'
+                      stats:
+                        type: object
+                  ring_buffer:
+                    type: object
+                    properties:
+                      size:
+                        type: integer
+                      current_count:
+                        type: integer
+                      oldest_event_id:
+                        type: string
+                      newest_event_id:
+                        type: string
+                  timestamp:
+                    type: string
+                    format: date-time
+
+  # ============================================
+  # RECON ORCHESTRATOR (Port 8000)
+  # ============================================
+  /api/v1/llm/status:
+    get:
+      tags: [Orchestrator]
+      summary: LLM availability and configuration
+      description: Check LLM connectivity, configured model(s), and CrewAI enablement flags.
+      operationId: getLlmStatus
+      responses:
+        '200':
+          description: LLM status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LlmStatusResponse'
+
+  /api/v1/missions:
+    post:
+      tags: [Orchestrator]
+      summary: Create and start new mission
+      operationId: createMission
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MissionCreate'
+      responses:
+        '201':
+          description: Mission created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MissionResponse'
+    get:
+      tags: [Orchestrator]
+      summary: List all missions
+      operationId: listMissions
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: Mission list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MissionListResponse'
+
+  /api/v1/missions/{mission_id}:
+    get:
+      tags: [Orchestrator]
+      summary: Get mission status
+      operationId: getMission
+      parameters:
+        - name: mission_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Mission details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MissionResponse'
+        '404':
+          description: Mission not found
+    delete:
+      tags: [Orchestrator, Graph Service]
+      summary: Delete a mission and all associated data
+      description: |
+        Deletes a mission and related data (nodes/edges/logs). Implemented by both:
+        - Recon Orchestrator (8000): deletes mission + orchestrator-side nodes/edges/logs
+        - Graph Service (8001): deletes mission + graph-side nodes/edges/logs/layouts
+      operationId: deleteMission
+      parameters:
+        - name: mission_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Mission deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MissionDeleteResponse'
+        '404':
+          description: Mission not found
+
+  /api/v1/missions/{mission_id}/cancel:
+    post:
+      tags: [Orchestrator]
+      summary: Cancel running mission
+      operationId: cancelMission
+      parameters:
+        - name: mission_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Mission cancelled
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  mission_id:
+                    type: string
+
+  /api/v1/missions/{mission_id}/history:
+    delete:
+      tags: [Graph Service]
+      summary: Delete mission history (logs only)
+      description: Deletes only logs/history for a mission (keeps nodes and edges).
+      operationId: deleteMissionHistory
+      parameters:
+        - name: mission_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Mission history deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MissionHistoryDeleteResponse'
+
+  /api/v1/missions/{mission_id}/phases/{phase}:
+    post:
+      tags: [Orchestrator]
+      summary: Manually trigger phase
+      operationId: triggerPhase
+      parameters:
+        - name: mission_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: phase
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/PhaseType'
+      responses:
+        '200':
+          description: Phase triggered
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  phase:
+                    type: string
+                  mission_id:
+                    type: string
+
+  /api/v1/data/clear:
+    delete:
+      tags: [Orchestrator, Graph Service]
+      summary: Clear ALL data (dangerous)
+      description: |
+        Deletes ALL missions, nodes, edges, logs (and layouts where applicable).
+        Requires `confirm=YES`.
+      operationId: clearAllData
+      parameters:
+        - name: confirm
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [YES]
+      responses:
+        '200':
+          description: All data cleared
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClearAllDataResponse'
+        '400':
+          description: Confirmation missing/invalid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/sse/logs/{mission_id}:
+    get:
+      tags: [Orchestrator]
+      summary: Server-Sent Events for mission logs
+      operationId: sseLogs
+      parameters:
+        - name: mission_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: SSE log stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+
+  # ============================================
+  # PHASE SERVICES (8002-8006)
+  # ============================================
+  /api/v1/execute:
+    post:
+      tags: [OSINT Runner, Active Recon, Endpoint Intel, Verification, Reporter]
+      summary: Execute phase
+      description: |
+        Execute a reconnaissance phase. Available on:
+        - OSINT Runner (8002): Passive reconnaissance
+        - Active Recon (8003): HTTP probing
+        - Endpoint Intel (8004): Endpoint enrichment
+        - Verification (8005): Security testing
+        - Reporter (8006): Report generation
+      operationId: executePhase
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PhaseExecuteRequest'
+      responses:
+        '200':
+          description: Phase execution result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PhaseExecuteResponse'
+
+  # ============================================
+  # PLANNER (Port 8007)
+  # ============================================
+  /api/v1/plan:
+    post:
+      tags: [Planner]
+      summary: Generate attack plan
+      operationId: generatePlan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlanRequest'
+      responses:
+        '200':
+          description: Attack plan
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlanResponse'
+
+  /api/v1/plan/{mission_id}:
+    get:
+      tags: [Planner]
+      summary: Get attack plan for mission
+      operationId: getPlan
+      parameters:
+        - name: mission_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Attack paths
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  mission_id:
+                    type: string
+                  attack_paths:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AttackPath'
+
+  # ============================================
+  # ENDPOINT INTEL (Port 8004)
+  # ============================================
+  /api/v1/enrich:
+    post:
+      tags: [Endpoint Intel]
+      summary: Enrich endpoints (risk scoring, params, hypotheses)
+      operationId: endpointIntelEnrich
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PhaseExecuteRequest'
+      responses:
+        '200':
+          description: Enrichment completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PhaseExecuteResponse'
+
+  # ============================================
+  # VERIFICATION (Port 8005)
+  # ============================================
+  /api/v1/analyze-page:
+    post:
+      tags: [Verification]
+      summary: Deep page analysis (forms, APIs, stack hints)
+      operationId: verificationAnalyzePage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PageAnalyzeRequest'
+      responses:
+        '200':
+          description: Page analyzed
+        '500':
+          description: Error during analysis
+
+  # ============================================
+  # REPORTER (Port 8006)
+  # ============================================
+  /api/v1/reports/{mission_id}:
+    get:
+      tags: [Reporter]
+      summary: List generated reports for a mission
+      operationId: reporterList
+      parameters:
+        - name: mission_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Reports available
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  mission_id:
+                    type: string
+                  reports:
+                    type: array
+                    items:
+                      type: string
+
+  /api/v1/reports/{mission_id}/{report_type}:
+    get:
+      tags: [Reporter]
+      summary: Download a specific report (summary/graph/metrics/knowledge)
+      operationId: reporterDownload
+      parameters:
+        - name: mission_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: report_type
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [summary, graph, metrics, knowledge]
+      responses:
+        '200':
+          description: Report content
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '404':
+          description: Report not found
+
+# ============================================
+# WEBSOCKET ENDPOINTS (Documented as x-websocket)
+# ============================================
+x-websocket-endpoints:
+  /ws/graph/{mission_id}:
+    service: Graph Service
+    port: 8001
+    description: Real-time graph event stream
+    parameters:
+      mission_id:
+        type: string
+        description: Mission ID to subscribe to
+    messages:
+      receive:
+        type: object
+        properties:
+          type:
+            type: string
+            enum: [node_added, node_updated, node_deleted, edge_added, edge_deleted, attack_path_added]
+          data:
+            type: object
+
+  /ws/logs/{mission_id}:
+    service: Recon Orchestrator
+    port: 8000
+    description: Real-time mission logs
+    parameters:
+      mission_id:
+        type: string
+        description: Mission ID to subscribe to
+    messages:
+      receive:
+        type: object
+        properties:
+          level:
+            type: string
+            enum: [debug, info, warning, error]
+          message:
+            type: string
+          timestamp:
+            type: string
+            format: date-time
+          phase:
+            type: string
+
+# ============================================
+# GRPC SERVICES (Documented as x-grpc)
+# ============================================
+x-grpc-services:
+  scanner-proxy:
+    port: 50051
+    description: gRPC interface for security scanning tools
+    methods:
+      run_subfinder:
+        description: Subdomain enumeration with caching
+        request:
+          domain:
+            type: string
+          timeout:
+            type: integer
+            default: 120
+          idempotency_key:
+            type: string
+        response:
+          subdomains:
+            type: array
+            items:
+              type: string
+          count:
+            type: integer
+
+      probe_http:
+        description: HTTP service detection
+        request:
+          urls:
+            type: array
+            items:
+              type: string
+          concurrency:
+            type: integer
+            default: 10
+          timeout:
+            type: integer
+            default: 30
+        response:
+          services:
+            type: array
+            items:
+              type: object
+          count:
+            type: integer
+
+      run_nuclei:
+        description: Vulnerability scanning with mode support
+        request:
+          target:
+            type: string
+          templates:
+            type: array
+            items:
+              type: string
+          mode:
+            type: string
+          idempotency_key:
+            type: string
+        response:
+          findings:
+            type: array
+            items:
+              type: object
+          count:
+            type: integer
+
+components:
+  schemas:
+    # ============================================
+    # COMMON SCHEMAS
+    # ============================================
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: healthy
+        service:
+          type: string
+        kafka:
+          type: string
+          enum: [connected, disconnected]
+        timestamp:
+          type: string
+          format: date-time
+
+    StatusResponse:
+      type: object
+      additionalProperties: true
+
+    LlmStatusResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [connected, disconnected, unavailable, error]
+        provider:
+          type: string
+        model:
+          type: string
+          nullable: true
+        coder_model:
+          type: string
+          nullable: true
+        url:
+          type: string
+        reason:
+          type: string
+        error:
+          type: string
+        crewai_available:
+          type: boolean
+        crewai_enabled:
+          type: boolean
+      additionalProperties: true
+
+    DebugSubscriptionsResponse:
+      type: object
+      properties:
+        event_queues:
+          type: object
+          additionalProperties:
+            type: integer
+        log_queues:
+          type: object
+          additionalProperties:
+            type: integer
+        kafka_connected:
+          type: boolean
+      additionalProperties: false
+
+    MissionDeleteResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [deleted]
+        mission_id:
+          type: string
+        mission_deleted:
+          type: boolean
+        nodes_deleted:
+          type: integer
+        edges_deleted:
+          type: integer
+        logs_deleted:
+          type: integer
+      additionalProperties: true
+
+    MissionHistoryDeleteResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [deleted]
+        mission_id:
+          type: string
+        logs_deleted:
+          type: integer
+      additionalProperties: true
+
+    ClearAllDataResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [cleared]
+        missions_deleted:
+          type: integer
+        nodes_deleted:
+          type: integer
+        edges_deleted:
+          type: integer
+        logs_deleted:
+          type: integer
+        memory_cleared:
+          type: object
+          properties:
+            nodes:
+              type: integer
+            edges:
+              type: integer
+          additionalProperties: false
+        database_cleared:
+          type: object
+          properties:
+            missions_deleted:
+              type: integer
+            nodes_deleted:
+              type: integer
+            edges_deleted:
+              type: integer
+            logs_deleted:
+              type: integer
+          additionalProperties: true
+      additionalProperties: true
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+        detail:
+          type: string
+        status_code:
+          type: integer
+
+    # ============================================
+    # ENUMS
+    # ============================================
+    NodeType:
+      type: string
+      enum:
+        # Asset nodes
+        - DOMAIN
+        - SUBDOMAIN
+        - HTTP_SERVICE
+        - ENDPOINT
+        - PARAMETER
+        - HYPOTHESIS
+        - VULNERABILITY
+        - ATTACK_PATH
+        - IP_ADDRESS
+        - DNS_RECORD
+        - ASN
+        - ORG
+        # Workflow nodes
+        - AGENT_RUN
+        - TOOL_CALL
+        - LLM_REASONING
+
+    EdgeType:
+      type: string
+      enum:
+        # Asset relationships
+        - HAS_SUBDOMAIN
+        - RESOLVES_TO
+        - SERVES
+        - EXPOSES_HTTP
+        - EXPOSES_ENDPOINT
+        - HAS_PARAM
+        - HAS_HYPOTHESIS
+        - HAS_VULNERABILITY
+        - TARGETS
+        # Workflow relationships
+        - TRIGGERS
+        - USES_TOOL
+        - PRODUCES
+        - REFINES
+        - LINKS_TO
+
+    EventType:
+      type: string
+      enum:
+        - NODE_ADDED
+        - NODE_UPDATED
+        - NODE_DELETED
+        - EDGE_ADDED
+        - EDGE_DELETED
+        - ATTACK_PATH_ADDED
+        - AGENT_STARTED
+        - AGENT_FINISHED
+        - TOOL_CALLED
+        - TOOL_FINISHED
+        - ASSET_MUTATION
+
+    MissionMode:
+      type: string
+      enum:
+        - STEALTH
+        - AGGRESSIVE
+        - BALANCED
+
+    MissionStatus:
+      type: string
+      enum:
+        - PENDING
+        - RUNNING
+        - COMPLETED
+        - FAILED
+        - CANCELLED
+
+    PhaseType:
+      type: string
+      enum:
+        - OSINT
+        - SAFETY_NET
+        - ACTIVE_RECON
+        - ENDPOINT_INTEL
+        - VERIFICATION
+        - REPORTING
+
+    # ============================================
+    # NODE SCHEMAS
+    # ============================================
+    NodeCreate:
+      type: object
+      required:
+        - id
+        - type
+        - mission_id
+      properties:
+        id:
+          type: string
+        type:
+          $ref: '#/components/schemas/NodeType'
+        mission_id:
+          type: string
+        properties:
+          type: object
+          additionalProperties: true
+
+    NodeUpdate:
+      type: object
+      properties:
+        properties:
+          type: object
+          additionalProperties: true
+
+    NodeResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          $ref: '#/components/schemas/NodeType'
+        mission_id:
+          type: string
+        properties:
+          type: object
+          additionalProperties: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    GraphQuery:
+      type: object
+      required:
+        - mission_id
+      properties:
+        mission_id:
+          type: string
+        node_types:
+          type: array
+          items:
+            $ref: '#/components/schemas/NodeType'
+        risk_score_min:
+          type: integer
+          minimum: 0
+          maximum: 100
+        limit:
+          type: integer
+          default: 100
+        offset:
+          type: integer
+          default: 0
+
+    NodeQueryResponse:
+      type: object
+      properties:
+        nodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/NodeResponse'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    # ============================================
+    # EDGE SCHEMAS
+    # ============================================
+    EdgeCreate:
+      type: object
+      required:
+        - from_node
+        - to_node
+        - edge_type
+        - mission_id
+      properties:
+        from_node:
+          type: string
+        to_node:
+          type: string
+        edge_type:
+          $ref: '#/components/schemas/EdgeType'
+        mission_id:
+          type: string
+        properties:
+          type: object
+          additionalProperties: true
+
+    EdgeResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        from_node:
+          type: string
+        to_node:
+          type: string
+        edge_type:
+          $ref: '#/components/schemas/EdgeType'
+        mission_id:
+          type: string
+        properties:
+          type: object
+          additionalProperties: true
+        created_at:
+          type: string
+          format: date-time
+
+    # ============================================
+    # GRAPH SCHEMAS
+    # ============================================
+    GraphStats:
+      type: object
+      properties:
+        total_nodes:
+          type: integer
+        total_edges:
+          type: integer
+        nodes_by_type:
+          type: object
+          additionalProperties:
+            type: integer
+        edges_by_type:
+          type: object
+          additionalProperties:
+            type: integer
+        risk_distribution:
+          type: object
+          properties:
+            critical:
+              type: integer
+            high:
+              type: integer
+            medium:
+              type: integer
+            low:
+              type: integer
+            info:
+              type: integer
+
+    GraphExport:
+      type: object
+      properties:
+        mission_id:
+          type: string
+        nodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/NodeResponse'
+        edges:
+          type: array
+          items:
+            $ref: '#/components/schemas/EdgeResponse'
+        timestamp:
+          type: string
+          format: date-time
+
+    # ============================================
+    # LAYOUT SCHEMAS
+    # ============================================
+    LayoutSave:
+      type: object
+      required:
+        - positions
+      properties:
+        positions:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              x:
+                type: number
+              y:
+                type: number
+        zoom:
+          type: number
+        pan:
+          type: object
+          properties:
+            x:
+              type: number
+            y:
+              type: number
+
+    LayoutResponse:
+      type: object
+      properties:
+        positions:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              x:
+                type: number
+              y:
+                type: number
+        zoom:
+          type: number
+        pan:
+          type: object
+          properties:
+            x:
+              type: number
+            y:
+              type: number
+        updated_at:
+          type: string
+          format: date-time
+
+    # ============================================
+    # WORKFLOW SCHEMAS
+    # ============================================
+    WorkflowQuery:
+      type: object
+      required:
+        - mission_id
+      properties:
+        mission_id:
+          type: string
+        node_types:
+          type: array
+          items:
+            $ref: '#/components/schemas/NodeType'
+
+    WorkflowQueryResponse:
+      type: object
+      properties:
+        nodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/NodeResponse'
+        edges:
+          type: array
+          items:
+            $ref: '#/components/schemas/EdgeResponse'
+        total_nodes:
+          type: integer
+        total_edges:
+          type: integer
+
+    # ============================================
+    # MISSION SCHEMAS
+    # ============================================
+    MissionCreate:
+      type: object
+      required:
+        - target_domain
+      properties:
+        target_domain:
+          type: string
+          format: hostname
+          example: example.com
+        mode:
+          $ref: '#/components/schemas/MissionMode'
+          default: AGGRESSIVE
+        seed_subdomains:
+          type: array
+          items:
+            type: string
+        options:
+          type: object
+          additionalProperties: true
+
+    MissionResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        target_domain:
+          type: string
+        mode:
+          $ref: '#/components/schemas/MissionMode'
+        status:
+          $ref: '#/components/schemas/MissionStatus'
+        current_phase:
+          $ref: '#/components/schemas/PhaseType'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        progress:
+          type: object
+          additionalProperties: true
+
+    MissionListResponse:
+      type: object
+      properties:
+        missions:
+          type: array
+          items:
+            $ref: '#/components/schemas/MissionResponse'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    # ============================================
+    # GRAPHQL SCHEMAS
+    # ============================================
+    GraphQLRequest:
+      type: object
+      required:
+        - query
+      properties:
+        query:
+          type: string
+          description: GraphQL query string
+        variables:
+          type: object
+          additionalProperties: true
+        operationName:
+          type: string
+
+    GraphQLResponse:
+      type: object
+      properties:
+        data:
+          type: object
+          additionalProperties: true
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              message:
+                type: string
+              locations:
+                type: array
+                items:
+                  type: object
+              path:
+                type: array
+                items:
+                  type: string
+
+    # ============================================
+    # PHASE EXECUTION SCHEMAS
+    # ============================================
+    PhaseExecuteRequest:
+      type: object
+      required:
+        - mission_id
+        - target_domain
+      properties:
+        mission_id:
+          type: string
+        target_domain:
+          type: string
+        mode:
+          type: string
+        options:
+          type: object
+          additionalProperties: true
+
+    PhaseExecuteResponse:
+      type: object
+      properties:
+        phase:
+          type: string
+        status:
+          type: string
+          enum: [completed, failed]
+        duration:
+          type: number
+          format: float
+        results:
+          type: object
+          additionalProperties: true
+
+    PageAnalyzeRequest:
+      type: object
+      required:
+        - mission_id
+        - url
+      properties:
+        mission_id:
+          type: string
+        url:
+          type: string
+        options:
+          type: object
+          additionalProperties: true
+
+    # ============================================
+    # PLANNER SCHEMAS
+    # ============================================
+    PlanRequest:
+      type: object
+      required:
+        - mission_id
+      properties:
+        mission_id:
+          type: string
+        top_k:
+          type: integer
+          default: 5
+
+    PlanResponse:
+      type: object
+      properties:
+        mission_id:
+          type: string
+        paths:
+          type: array
+          items:
+            $ref: '#/components/schemas/AttackPath'
+        computed_at:
+          type: string
+          format: date-time
+
+    AttackPath:
+      type: object
+      properties:
+        target:
+          type: string
+        score:
+          type: integer
+          minimum: 0
+          maximum: 100
+        actions:
+          type: array
+          items:
+            type: string
+        reasons:
+          type: array
+          items:
+            type: string
