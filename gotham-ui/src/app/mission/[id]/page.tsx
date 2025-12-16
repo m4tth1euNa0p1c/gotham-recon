@@ -3,6 +3,7 @@
 import { useParams } from "next/navigation";
 import { useEffect, useState, useMemo } from "react";
 import { graphqlFetch, QUERIES, Mission, API_CONFIG } from "@/lib/api";
+import { useMissionStore } from "@/stores/missionStore";
 import {
   Loader2,
   ArrowLeft,
@@ -111,6 +112,10 @@ export default function MissionDetailPage() {
   const [nodes, setNodes] = useState<GraphNode[]>([]);
   const [missionDetails, setMissionDetails] = useState<MissionProgress | null>(null);
 
+  // Get store functions to update global mission state
+  const setCurrentMission = useMissionStore((state) => state.setCurrentMission);
+  const currentMission = useMissionStore((state) => state.currentMission);
+
   // Fetch all data
   useEffect(() => {
     const fetchAll = async () => {
@@ -121,6 +126,24 @@ export default function MissionDetailPage() {
           { id: missionId }
         );
         setMission(missionData.mission);
+        // Update global store so Sidebar shows correct mission navigation
+        // Convert to match MissionService.Mission type (uppercase mode, proper progress type)
+        if (missionData.mission) {
+          const m = missionData.mission;
+          setCurrentMission({
+            id: m.id,
+            targetDomain: m.targetDomain,
+            status: m.status,
+            currentPhase: m.currentPhase,
+            createdAt: m.createdAt,
+            mode: m.mode.toUpperCase() as 'STEALTH' | 'BALANCED' | 'AGGRESSIVE',
+            progress: m.progress ? {
+              phase: (m.progress as Record<string, unknown>).phase as string || '',
+              percent: (m.progress as Record<string, unknown>).percent as number || 0,
+              message: (m.progress as Record<string, unknown>).message as string || '',
+            } : undefined,
+          });
+        }
 
         // Fetch stats
         const statsData = await graphqlFetch<{ graphStats: GraphStats }>(
