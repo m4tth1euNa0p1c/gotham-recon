@@ -1,8 +1,9 @@
 # Recon Gotham (root) — ignore secrets & local artifacts
 
-# --- AI / agent tooling ---
-.claude/
-CLAUDE.md
+recon_gotham/
+docs/
+data/
+
 
 # --- Environment / secrets ---
 .env

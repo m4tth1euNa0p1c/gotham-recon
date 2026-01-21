@@ -23,6 +23,16 @@ RUN wget -q https://github.com/projectdiscovery/httpx/releases/download/v1.6.8/h
     && chmod +x /usr/local/bin/httpx-pd \
     && rm /tmp/httpx.zip
 
+# Install Nuclei for vulnerability scanning
+RUN wget -q https://github.com/projectdiscovery/nuclei/releases/download/v3.3.7/nuclei_3.3.7_linux_amd64.zip -O /tmp/nuclei.zip \
+    && unzip -q /tmp/nuclei.zip -d /usr/local/bin/ \
+    && chmod +x /usr/local/bin/nuclei \
+    && rm /tmp/nuclei.zip
+
+# Download Nuclei templates
+RUN mkdir -p /root/nuclei-templates \
+    && nuclei -update-templates -silent || true
+
 # Create data directory for SQLite database
 RUN mkdir -p /data && chmod 777 /data
 

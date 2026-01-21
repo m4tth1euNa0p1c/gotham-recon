@@ -135,6 +135,19 @@ class GraphClient:
 
     async def add_endpoint(self, path: str, method: str = "GET", category: str = None, risk_score: int = None) -> bool:
         """Add an endpoint node"""
+        # Filter out external URLs (CDNs, third-party services)
+        if path.startswith("http"):
+            from urllib.parse import urlparse
+            parsed = urlparse(path)
+            # Only accept endpoints from target domain
+            if not parsed.netloc.endswith(self.target_domain):
+                return False  # Skip external URLs
+            path = parsed.path or "/"
+
+        # Skip empty or root-only paths if not meaningful
+        if not path or path == "/":
+            return False
+
         node_id = f"endpoint:{self.target_domain}{path}"
         props = {
             "path": path,
@@ -162,6 +175,86 @@ class GraphClient:
                 "mission_id": self.mission_id
             }
         )
+
+    async def add_vulnerability(self, vuln_type: str, target_id: str, title: str,
+                                risk_score: int = 50, status: str = "THEORETICAL") -> bool:
+        """Add a vulnerability node"""
+        import hashlib
+        vuln_hash = hashlib.md5(f"{vuln_type}:{target_id}".encode()).hexdigest()[:8]
+        node_id = f"vuln:{vuln_type.lower()}:{vuln_hash}"
+        return await self.create_node(
+            "VULNERABILITY",
+            node_id,
+            {
+                "attack_type": vuln_type.upper(),
+                "title": title,
+                "target_id": target_id,
+                "risk_score": risk_score,
+                "status": status,
+                "verified": False,
+                "mission_id": self.mission_id
+            }
+        )
+
+    async def generate_hypotheses_from_path(self, path: str) -> int:
+        """
+        Automatically generate hypotheses based on endpoint path patterns.
+        Returns count of hypotheses created.
+        """
+        created = 0
+        path_lower = path.lower()
+        target_id = f"endpoint:{self.target_domain}{path}"
+
+        # Pattern -> (attack_type, title, confidence, risk_score)
+        PATTERNS = [
+            # Admin/Auth patterns
+            (r'admin|dashboard|panel|manage', 'AUTH_BYPASS', 'Admin interface authentication bypass', 0.7, 75),
+            (r'login|signin|auth|session', 'AUTH_BYPASS', 'Authentication mechanism bypass', 0.6, 70),
+            (r'password|reset|forgot', 'AUTH_BYPASS', 'Password reset flow vulnerability', 0.5, 65),
+
+            # API patterns
+            (r'/api/', 'BOLA', 'Broken Object Level Authorization on API', 0.6, 70),
+            (r'/api/v[0-9]', 'INFO_DISCLOSURE', 'API version exposure and enumeration', 0.5, 50),
+            (r'graphql', 'INFO_DISCLOSURE', 'GraphQL introspection enabled', 0.7, 60),
+
+            # File patterns
+            (r'upload|file|document|attachment', 'RCE', 'Unrestricted file upload vulnerability', 0.5, 85),
+            (r'download|export|backup', 'LFI', 'Path traversal in file download', 0.6, 75),
+            (r'\.php\?', 'LFI', 'PHP parameter injection vulnerability', 0.5, 70),
+
+            # User patterns
+            (r'user|profile|account|member', 'IDOR', 'Insecure direct object reference on user data', 0.6, 70),
+            (r'edit|update|modify|delete', 'CSRF', 'Cross-site request forgery on state-changing action', 0.5, 60),
+
+            # Data patterns
+            (r'search|query|filter', 'SQLI', 'SQL injection in search/filter functionality', 0.5, 80),
+            (r'id=|user_id=|item=', 'SQLI', 'SQL injection via parameter manipulation', 0.6, 80),
+            (r'callback|redirect|return|next|url=', 'OPEN_REDIRECT', 'Open redirect vulnerability', 0.7, 55),
+
+            # Config/Debug patterns
+            (r'config|settings|\.env|debug', 'INFO_DISCLOSURE', 'Configuration file exposure', 0.7, 70),
+            (r'phpinfo|server-status|health', 'INFO_DISCLOSURE', 'Server information disclosure', 0.8, 50),
+            (r'\.git|\.svn|\.hg', 'INFO_DISCLOSURE', 'Version control exposure', 0.9, 75),
+            (r'backup|\.bak|\.old|\.orig', 'INFO_DISCLOSURE', 'Backup file exposure', 0.8, 65),
+
+            # Internal patterns
+            (r'internal|private|dev|test|staging', 'INFO_DISCLOSURE', 'Internal/development endpoint exposure', 0.7, 60),
+            (r'proxy|forward|fetch|curl', 'SSRF', 'Server-side request forgery vulnerability', 0.5, 80),
+        ]
+
+        import re
+        for pattern, attack_type, title, confidence, risk_score in PATTERNS:
+            if re.search(pattern, path_lower):
+                # Create hypothesis
+                if await self.add_hypothesis(title, attack_type, target_id, confidence):
+                    created += 1
+                # Create theoretical vulnerability
+                if await self.add_vulnerability(attack_type, target_id, title, risk_score, "THEORETICAL"):
+                    created += 1
+                # Only create one hypothesis per endpoint to avoid spam
+                break
+
+        return created
 
 
 def parse_crew_result(result: Any) -> List[str]:

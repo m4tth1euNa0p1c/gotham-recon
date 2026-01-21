@@ -4,11 +4,35 @@
 >
 > Port: 8080 | Base URL: `http://localhost:8080`
 >
-> Version: 3.2.0 | Dernière mise à jour: Décembre 2025
+> Version: 3.2.1 | Dernière mise à jour: Décembre 2025
 
 ---
 
-## Changelog v3.2
+## Changelog v3.2.1
+
+### Performance & Reliability Fixes
+
+| Fix | Description |
+|-----|-------------|
+| **HTTP Timeout** | Augmentation du timeout de 10s à 60s pour les requêtes vers l'orchestrator |
+| **Error Logging** | Amélioration du logging avec type d'exception et traceback complet |
+| **Kafka Reconnection** | Meilleure gestion de la reconnexion Kafka après redémarrage |
+
+### Code Changes
+
+```python
+# Avant (v3.2.0)
+async with httpx.AsyncClient(timeout=10.0) as client:
+
+# Après (v3.2.1)
+async with httpx.AsyncClient(timeout=60.0) as client:
+```
+
+**Raison:** L'orchestrator peut être lent à répondre pendant l'exécution d'une mission CrewAI (single worker uvicorn). Le timeout de 60s permet d'éviter les erreurs `ReadTimeout` fréquentes.
+
+---
+
+## Changelog v3.2.0
 
 ### GraphQL Schema Fixes
 

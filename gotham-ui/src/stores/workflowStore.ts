@@ -45,7 +45,19 @@ export interface ToolCallNode extends DomainNode {
     duration?: number;
     inputHash?: string;
     outcome?: 'success' | 'failure';
+    producedAssets?: string[]; // IDs of assets produced by this tool
   }
+}
+
+// Asset node produced by agents/tools
+export interface AssetNode {
+  id: string;
+  type: string; // ENDPOINT, VULNERABILITY, HYPOTHESIS, SUBDOMAIN, etc.
+  label: string;
+  originAgentId?: string;
+  originToolId?: string;
+  properties: Record<string, unknown>;
+  createdAt?: string;
 }
 
 export interface TraceLogEntry {
@@ -63,6 +75,7 @@ export interface WorkflowState {
   // Data
   agentRuns: Map<string, AgentRunNode>;
   toolCalls: Map<string, ToolCallNode>;
+  producedAssets: Map<string, AssetNode>; // Assets with origin tracking
   edges: DomainEdge[];
   traces: TraceLogEntry[];
 
@@ -100,6 +113,10 @@ export interface WorkflowState {
   addToolCall: (tool: Omit<ToolCallNode, 'type'> & { type?: string }) => void;
   updateToolCall: (toolId: string, updates: Partial<ToolCallNode['data']>) => void;
 
+  // Asset tracking
+  addProducedAsset: (asset: AssetNode) => void;
+  linkAssetToOrigin: (assetId: string, originId: string, originType: 'agent' | 'tool') => void;
+
   // Replay Actions
   setReplayMode: (mode: ReplayMode) => void;
   setReplaySpeed: (speed: number) => void;
@@ -107,11 +124,15 @@ export interface WorkflowState {
   stepBackward: () => void;
 
   reset: () => void;
+
+  // Force complete all running items (for mission completion)
+  forceCompleteAll: () => void;
 }
 
 const initialState = {
   agentRuns: new Map<string, AgentRunNode>(),
   toolCalls: new Map<string, ToolCallNode>(),
+  producedAssets: new Map<string, AssetNode>(),
   edges: [] as DomainEdge[],
   traces: [] as TraceLogEntry[],
 
@@ -273,9 +294,130 @@ export const useWorkflowStore = create<WorkflowState>()(
             break;
 
           case 'asset_mutation':
+          case 'node_added':
+          case 'NODE_ADDED':
             set(state => {
-              const trace = createTrace('asset_mutation', `Asset ${data.operation}: ${data.node?.type || 'unknown'}`, undefined, data);
+              const node = data.node || data;
+              const props = node.properties || node;
+              const nodeType = node.type || props.type;
+
+              // Only track assets with origin information
+              const originAgentId = props.origin_agent_id || props.agent_id || props.discovered_by_agent;
+              const originToolId = props.origin_tool_id || props.tool_id || props.discovered_by_tool;
+
+              // Skip workflow nodes (AGENT_RUN, TOOL_CALL)
+              if (['AGENT_RUN', 'TOOL_CALL', 'LLM_REASONING'].includes(nodeType)) {
+                const trace = createTrace('asset_mutation', `Workflow node: ${nodeType}`, undefined, data);
+                return { traces: [...state.traces, trace] };
+              }
+
+              // Track asset with origin
+              if (originAgentId || originToolId) {
+                const newAssets = new Map(state.producedAssets);
+                const newEdges = [...state.edges];
+
+                const assetNode: AssetNode = {
+                  id: node.id,
+                  type: nodeType,
+                  label: props.name || props.subdomain || props.path || props.url || node.id.substring(0, 16),
+                  originAgentId,
+                  originToolId,
+                  properties: props,
+                  createdAt: timestamp,
+                };
+
+                newAssets.set(node.id, assetNode);
+
+                // Create PRODUCES edge from origin to asset
+                const originId = originToolId || originAgentId;
+                if (originId) {
+                  const edgeExists = newEdges.some(
+                    e => e.source === originId && e.target === node.id && e.type === EdgeType.PRODUCES
+                  );
+                  if (!edgeExists) {
+                    newEdges.push({
+                      id: `${originId}_produces_${node.id}`,
+                      source: originId,
+                      target: node.id,
+                      type: EdgeType.PRODUCES,
+                      label: 'produces'
+                    });
+                  }
+
+                  // Also update the tool's producedAssets list
+                  if (originToolId) {
+                    const newTools = new Map(state.toolCalls);
+                    const tool = newTools.get(originToolId);
+                    if (tool) {
+                      const producedAssets = tool.data.producedAssets || [];
+                      if (!producedAssets.includes(node.id)) {
+                        newTools.set(originToolId, {
+                          ...tool,
+                          data: {
+                            ...tool.data,
+                            producedAssets: [...producedAssets, node.id]
+                          }
+                        });
+                        return {
+                          producedAssets: newAssets,
+                          edges: newEdges,
+                          toolCalls: newTools,
+                          traces: [...state.traces, createTrace('asset_mutation', `Asset ${nodeType}: ${assetNode.label} (from ${originToolId})`, node.id, data)]
+                        };
+                      }
+                    }
+                  }
+                }
+
+                const trace = createTrace('asset_mutation', `Asset ${nodeType}: ${assetNode.label}`, node.id, data);
+                return { producedAssets: newAssets, edges: newEdges, traces: [...state.traces, trace] };
+              }
+
+              const trace = createTrace('asset_mutation', `Asset ${data.operation || 'added'}: ${nodeType}`, undefined, data);
               return { traces: [...state.traces, trace] };
+            });
+            break;
+
+          // Handle mission completion - mark all running items as completed
+          case 'mission_completed':
+          case 'mission_finished':
+          case 'MISSION_COMPLETED':
+          case 'MISSION_FINISHED':
+            set(state => {
+              const newAgents = new Map(state.agentRuns);
+              const newTools = new Map(state.toolCalls);
+
+              // Mark all running agents as completed
+              newAgents.forEach((agent, id) => {
+                if (agent.status === 'running') {
+                  newAgents.set(id, {
+                    ...agent,
+                    status: 'completed',
+                    data: {
+                      ...agent.data,
+                      endTime: timestamp,
+                    }
+                  });
+                }
+              });
+
+              // Mark all running tools as completed
+              newTools.forEach((tool, id) => {
+                if (tool.status === 'running') {
+                  newTools.set(id, {
+                    ...tool,
+                    status: 'completed',
+                    data: {
+                      ...tool.data,
+                      endTime: timestamp,
+                    }
+                  });
+                }
+              });
+
+              const trace = createTrace('mission_completed', `Mission completed`, undefined, data);
+              console.log(`[WorkflowStore] Mission completed - marked ${newAgents.size} agents and ${newTools.size} tools as completed`);
+              return { agentRuns: newAgents, toolCalls: newTools, traces: [...state.traces, trace] };
             });
             break;
 
@@ -292,12 +434,16 @@ export const useWorkflowStore = create<WorkflowState>()(
               for (const node of nodes) {
                 if (node.type === 'AGENT_RUN') {
                   const props = node.properties || {};
+                  // Normalize status: backend sends 'success' for completed agents
+                  const normalizedStatus = (props.status === 'completed' || props.status === 'success')
+                    ? 'completed'
+                    : (props.status === 'running' ? 'running' : (props.end_time ? 'completed' : 'running'));
                   newAgents.set(node.id, {
                     id: node.id,
                     type: NodeType.AGENT_RUN,
                     label: props.agent_name || 'Unknown Agent',
                     metadata: { timestamp: props.start_time, phase: props.phase },
-                    status: props.status === 'completed' ? 'completed' : (props.status === 'running' ? 'running' : 'error'),
+                    status: normalizedStatus,
                     data: {
                       agentName: props.agent_name,
                       phase: (props.phase as MissionPhase) || MissionPhase.OSINT,
@@ -309,12 +455,16 @@ export const useWorkflowStore = create<WorkflowState>()(
                   });
                 } else if (node.type === 'TOOL_CALL') {
                   const props = node.properties || {};
+                  // Normalize status: check for 'success' and use end_time as fallback
+                  const normalizedStatus = (props.status === 'completed' || props.status === 'success')
+                    ? 'completed'
+                    : (props.status === 'running' ? 'running' : (props.end_time ? 'completed' : 'running'));
                   newTools.set(node.id, {
                     id: node.id,
                     type: NodeType.TOOL_CALL,
                     label: props.tool_name || props.tool || 'Unknown Tool',
                     metadata: { timestamp: props.start_time, source: props.agent_id },
-                    status: props.status === 'completed' ? 'completed' : (props.status === 'running' ? 'running' : 'error'),
+                    status: normalizedStatus,
                     data: {
                       toolName: props.tool_name || props.tool,
                       agentId: props.agent_id,
@@ -447,7 +597,101 @@ export const useWorkflowStore = create<WorkflowState>()(
         return { toolCalls: newTools, traces: [...state.traces, trace] };
       }),
 
+      addProducedAsset: (asset: AssetNode) => set((state) => {
+        const newAssets = new Map(state.producedAssets);
+        newAssets.set(asset.id, asset);
+
+        const newEdges = [...state.edges];
+
+        // Create PRODUCES edge from origin
+        const originId = asset.originToolId || asset.originAgentId;
+        if (originId) {
+          const edgeExists = newEdges.some(
+            e => e.source === originId && e.target === asset.id && e.type === EdgeType.PRODUCES
+          );
+          if (!edgeExists) {
+            newEdges.push({
+              id: `${originId}_produces_${asset.id}`,
+              source: originId,
+              target: asset.id,
+              type: EdgeType.PRODUCES,
+              label: 'produces'
+            });
+          }
+        }
+
+        return { producedAssets: newAssets, edges: newEdges };
+      }),
+
+      linkAssetToOrigin: (assetId: string, originId: string, originType: 'agent' | 'tool') => set((state) => {
+        const newAssets = new Map(state.producedAssets);
+        const asset = newAssets.get(assetId);
+
+        if (asset) {
+          if (originType === 'agent') {
+            asset.originAgentId = originId;
+          } else {
+            asset.originToolId = originId;
+          }
+          newAssets.set(assetId, asset);
+        }
+
+        // Create PRODUCES edge
+        const newEdges = [...state.edges];
+        const edgeExists = newEdges.some(
+          e => e.source === originId && e.target === assetId && e.type === EdgeType.PRODUCES
+        );
+        if (!edgeExists) {
+          newEdges.push({
+            id: `${originId}_produces_${assetId}`,
+            source: originId,
+            target: assetId,
+            type: EdgeType.PRODUCES,
+            label: 'produces'
+          });
+        }
+
+        return { producedAssets: newAssets, edges: newEdges };
+      }),
+
       reset: () => set(initialState),
+
+      forceCompleteAll: () => set((state) => {
+        const newAgents = new Map(state.agentRuns);
+        const newTools = new Map(state.toolCalls);
+        const timestamp = new Date().toISOString();
+
+        // Mark all running agents as completed
+        newAgents.forEach((agent, id) => {
+          if (agent.status === 'running') {
+            newAgents.set(id, {
+              ...agent,
+              status: 'completed',
+              data: {
+                ...agent.data,
+                endTime: agent.data.endTime || timestamp,
+              }
+            });
+          }
+        });
+
+        // Mark all running tools as completed
+        newTools.forEach((tool, id) => {
+          if (tool.status === 'running') {
+            newTools.set(id, {
+              ...tool,
+              status: 'completed',
+              data: {
+                ...tool.data,
+                endTime: tool.data.endTime || timestamp,
+              }
+            });
+          }
+        });
+
+        console.log(`[WorkflowStore] Force completed all running items`);
+        return { agentRuns: newAgents, toolCalls: newTools };
+      }),
     })),
     { name: 'workflow-store' }
   )

@@ -1,17 +1,23 @@
 "use client";
 
+/**
+ * TracePanel
+ * Execution trace log panel showing real-time events from workflow execution.
+ *
+ * Design: Colored left borders per event type, compact entries
+ */
+
 import { useMemo, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Activity,
   Clock,
-  CheckCircle,
-  XCircle,
   Cpu,
   Wrench,
   Link,
   ChevronRight,
   Zap,
+  Database,
 } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
 import { useWorkflowStore } from "@/stores/workflowStore";
@@ -21,6 +27,18 @@ interface TracePanelProps {
   className?: string;
   maxHeight?: string;
 }
+
+// Event type colors - matching mock design
+const EVENT_COLORS: Record<string, { border: string; bg: string; icon: string }> = {
+  agent_started: { border: "border-l-cyan-500", bg: "bg-cyan-500/5", icon: "text-cyan-400" },
+  agent_finished: { border: "border-l-emerald-500", bg: "bg-emerald-500/5", icon: "text-emerald-400" },
+  tool_called: { border: "border-l-amber-500", bg: "bg-amber-500/5", icon: "text-amber-400" },
+  tool_finished: { border: "border-l-emerald-500", bg: "bg-emerald-500/5", icon: "text-emerald-400" },
+  asset_mutation: { border: "border-l-purple-500", bg: "bg-purple-500/5", icon: "text-purple-400" },
+  error: { border: "border-l-red-500", bg: "bg-red-500/5", icon: "text-red-400" },
+};
+
+const DEFAULT_EVENT_COLORS = { border: "border-l-slate-600", bg: "bg-slate-800/30", icon: "text-slate-500" };
 
 // Format timestamp for display
 function formatTime(timestamp: string): string {
@@ -42,41 +60,26 @@ function formatDuration(ms: number): string {
 
 // Get icon for trace type
 function getTraceIcon(type: string) {
+  const colors = EVENT_COLORS[type] || DEFAULT_EVENT_COLORS;
   switch (type) {
     case "agent_started":
-      return <Activity size={14} className="text-cyan-400" />;
+      return <Cpu size={12} className={colors.icon} />;
     case "agent_finished":
-      return <CheckCircle size={14} className="text-green-400" />;
+      return <Zap size={12} className={colors.icon} />;
     case "tool_called":
-      return <Wrench size={14} className="text-amber-400" />;
+      return <Wrench size={12} className={colors.icon} />;
     case "tool_finished":
-      return <Zap size={14} className="text-emerald-400" />;
+      return <Zap size={12} className={colors.icon} />;
     case "asset_mutation":
-      return <Link size={14} className="text-purple-400" />;
+      return <Database size={12} className={colors.icon} />;
+    case "error":
+      return <Activity size={12} className={colors.icon} />;
     default:
-      return <ChevronRight size={14} className="text-gray-400" />;
+      return <ChevronRight size={12} className={colors.icon} />;
   }
 }
 
-// Get color for trace type
-function getTraceColor(type: string): string {
-  switch (type) {
-    case "agent_started":
-      return "border-cyan-500/30";
-    case "agent_finished":
-      return "border-green-500/30";
-    case "tool_called":
-      return "border-amber-500/30";
-    case "tool_finished":
-      return "border-emerald-500/30";
-    case "asset_mutation":
-      return "border-purple-500/30";
-    default:
-      return "border-gray-500/30";
-  }
-}
-
-export default function TracePanel({ className = "", maxHeight = "400px" }: TracePanelProps) {
+export default function TracePanel({ className = "", maxHeight = "100%" }: TracePanelProps) {
   // Use useShallow to prevent infinite re-renders when arrays are recreated
   const traces = useWorkflowStore(useShallow((state) => state.traces));
   const agentRunsMap = useWorkflowStore((state) => state.agentRuns);
@@ -150,14 +153,18 @@ export default function TracePanel({ className = "", maxHeight = "400px" }: Trac
   }, [traces, selectedNodeId]);
 
   return (
-    <div className={`flex flex-col bg-[#0d0d12] border border-[#1a1a25] rounded-lg ${className}`}>
+    <div className={`flex flex-col bg-slate-900/30 ${className}`}>
       {/* Header */}
-      <div className="px-4 py-3 border-b border-[#1a1a25] flex items-center justify-between">
+      <div className="px-4 py-3 border-b border-slate-800/50 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-2">
-          <Activity size={16} className="text-cyan-400" />
-          <span className="text-sm font-medium text-white">Execution Trace</span>
+          <div className="p-1.5 rounded-md bg-cyan-500/10 border border-cyan-500/20">
+            <Activity size={12} className="text-cyan-400" />
+          </div>
+          <span className="text-xs font-semibold text-white">Execution Trace</span>
         </div>
-        <span className="text-xs text-gray-500">{traces.length} events</span>
+        <span className="text-[10px] text-slate-500 font-mono px-2 py-0.5 rounded bg-slate-800/50 border border-slate-700/50">
+          {traces.length} events
+        </span>
       </div>
 
       {/* Selected Node Details */}
@@ -167,64 +174,64 @@ export default function TracePanel({ className = "", maxHeight = "400px" }: Trac
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            className="border-b border-[#1a1a25] overflow-hidden"
+            className="border-b border-slate-800/50 overflow-hidden shrink-0"
           >
-            <div className="p-4 bg-[#0a0a0f]">
-              <div className="flex items-center justify-between mb-3">
+            <div className="p-3 bg-slate-800/20">
+              <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
                   {selectedNodeDetails.type === "agent" ? (
-                    <Cpu size={16} className="text-cyan-400" />
+                    <Cpu size={14} className="text-cyan-400" />
                   ) : (
-                    <Wrench size={16} className="text-amber-400" />
+                    <Wrench size={14} className="text-amber-400" />
                   )}
-                  <span className="text-sm font-medium text-white">
+                  <span className="text-xs font-medium text-white">
                     {selectedNodeDetails.title}
                   </span>
                 </div>
                 <span
-                  className={`px-2 py-0.5 text-xs rounded ${
+                  className={`px-2 py-0.5 text-[10px] font-mono rounded border ${
                     selectedNodeDetails.status === "completed"
-                      ? "bg-green-500/20 text-green-400"
+                      ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30"
                       : selectedNodeDetails.status === "running"
-                      ? "bg-cyan-500/20 text-cyan-400"
+                      ? "bg-cyan-500/20 text-cyan-400 border-cyan-500/30 animate-pulse"
                       : selectedNodeDetails.status === "error"
-                      ? "bg-red-500/20 text-red-400"
-                      : "bg-gray-500/20 text-gray-400"
+                      ? "bg-red-500/20 text-red-400 border-red-500/30"
+                      : "bg-slate-500/20 text-slate-400 border-slate-500/30"
                   }`}
                 >
                   {selectedNodeDetails.status.toUpperCase()}
                 </span>
               </div>
 
-              <div className="grid grid-cols-2 gap-2 text-xs">
+              <div className="grid grid-cols-2 gap-2 text-[10px]">
                 {selectedNodeDetails.phase && (
                   <div className="flex items-center gap-1.5">
-                    <span className="text-gray-500">Phase:</span>
-                    <span className="text-gray-300">{selectedNodeDetails.phase}</span>
+                    <span className="text-slate-500">Phase:</span>
+                    <span className="text-slate-300">{selectedNodeDetails.phase}</span>
                   </div>
                 )}
                 {selectedNodeDetails.latency !== undefined && (
                   <div className="flex items-center gap-1.5">
-                    <Clock size={12} className="text-gray-500" />
-                    <span className="text-gray-300">{formatDuration(selectedNodeDetails.latency)}</span>
+                    <Clock size={10} className="text-slate-500" />
+                    <span className="text-slate-300">{formatDuration(selectedNodeDetails.latency)}</span>
                   </div>
                 )}
                 {selectedNodeDetails.duration !== undefined && (
                   <div className="flex items-center gap-1.5">
-                    <Clock size={12} className="text-gray-500" />
-                    <span className="text-gray-300">{formatDuration(selectedNodeDetails.duration)}</span>
+                    <Clock size={10} className="text-slate-500" />
+                    <span className="text-slate-300">{formatDuration(selectedNodeDetails.duration)}</span>
                   </div>
                 )}
                 {selectedNodeDetails.tokens !== undefined && (
                   <div className="flex items-center gap-1.5">
-                    <span className="text-gray-500">Tokens:</span>
-                    <span className="text-gray-300">{selectedNodeDetails.tokens.toLocaleString()}</span>
+                    <span className="text-slate-500">Tokens:</span>
+                    <span className="text-slate-300">{selectedNodeDetails.tokens.toLocaleString()}</span>
                   </div>
                 )}
                 {selectedNodeDetails.outputNodeIds && selectedNodeDetails.outputNodeIds.length > 0 && (
                   <div className="col-span-2 flex items-center gap-1.5">
-                    <Link size={12} className="text-purple-400" />
-                    <span className="text-gray-300">
+                    <Link size={10} className="text-purple-400" />
+                    <span className="text-slate-300">
                       {selectedNodeDetails.outputNodeIds.length} assets produced
                     </span>
                   </div>
@@ -238,34 +245,35 @@ export default function TracePanel({ className = "", maxHeight = "400px" }: Trac
       {/* Trace List */}
       <div
         ref={scrollRef}
-        className="flex-1 overflow-y-auto p-2 space-y-1"
+        className="flex-1 overflow-y-auto p-2 space-y-1 scrollbar-thin scrollbar-track-slate-800/50 scrollbar-thumb-slate-700"
         style={{ maxHeight }}
       >
         <AnimatePresence mode="popLayout">
           {filteredTraces.length === 0 ? (
-            <div className="flex items-center justify-center h-20 text-gray-500 text-sm">
+            <div className="flex items-center justify-center h-20 text-slate-500 text-xs">
               {selectedNodeId ? "No events for selected node" : "Waiting for events..."}
             </div>
           ) : (
-            filteredTraces.map((trace) => (
-              <motion.div
-                key={trace.id}
-                initial={{ opacity: 0, x: -10 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: 10 }}
-                className={`flex items-start gap-2 p-2 rounded border-l-2 ${getTraceColor(
-                  trace.type
-                )} bg-[#0a0a0f]/50 hover:bg-[#0a0a0f] transition-colors`}
-              >
-                <div className="mt-0.5">{getTraceIcon(trace.type)}</div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs text-gray-300 truncate">{trace.message}</p>
-                  <p className="text-[10px] text-gray-500 mt-0.5">
-                    {formatTime(trace.timestamp)}
-                  </p>
-                </div>
-              </motion.div>
-            ))
+            filteredTraces.map((trace) => {
+              const colors = EVENT_COLORS[trace.type] || DEFAULT_EVENT_COLORS;
+              return (
+                <motion.div
+                  key={trace.id}
+                  initial={{ opacity: 0, x: -10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: 10 }}
+                  className={`flex items-start gap-2 p-2 rounded border-l-2 ${colors.border} ${colors.bg} hover:bg-opacity-50 transition-colors`}
+                >
+                  <div className="mt-0.5 shrink-0">{getTraceIcon(trace.type)}</div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[11px] text-slate-300 truncate">{trace.message}</p>
+                    <p className="text-[9px] text-slate-500 mt-0.5 font-mono">
+                      {formatTime(trace.timestamp)}
+                    </p>
+                  </div>
+                </motion.div>
+              );
+            })
           )}
         </AnimatePresence>
       </div>

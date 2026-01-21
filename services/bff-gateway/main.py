@@ -141,7 +141,7 @@ def get_events_after(mission_id: str, last_event_id: Optional[str]) -> List[dict
 
 async def get_snapshot_for_mission(mission_id: str) -> Optional[dict]:
     """Fetch current graph snapshot from graph-service"""
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with httpx.AsyncClient(timeout=60.0) as client:
         try:
             response = await client.get(f"{GRAPH_SERVICE_URL}/api/v1/missions/{mission_id}/export")
             if response.status_code == 200:
@@ -365,7 +365,7 @@ class NodeFilter:
 class Query:
     @strawberry.field
     async def mission(self, id: str) -> Optional[Mission]:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=60.0) as client:
             try:
                 response = await client.get(f"{ORCHESTRATOR_URL}/api/v1/missions/{id}")
                 if response.status_code == 200:
@@ -393,7 +393,7 @@ class Query:
 
     @strawberry.field
     async def missions(self, limit: int = 20, offset: int = 0) -> MissionConnection:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=60.0) as client:
             try:
                 response = await client.get(
                     f"{ORCHESTRATOR_URL}/api/v1/missions",
@@ -427,12 +427,14 @@ class Query:
                 print(f"[BFF] Orchestrator returned status {response.status_code}")
                 return MissionConnection(items=[], total=0)
             except Exception as e:
-                print(f"[BFF] Error fetching missions: {e}")
+                print(f"[BFF] Error fetching missions: {type(e).__name__}: {e}")
+                import traceback
+                traceback.print_exc()
                 return MissionConnection(items=[], total=0)
 
     @strawberry.field
     async def nodes(self, mission_id: str, filter: Optional[NodeFilter] = None, limit: int = 100) -> List[Node]:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=60.0) as client:
             payload = {"mission_id": mission_id, "limit": limit}
             if filter and filter.types:
                 payload["node_types"] = [t.value for t in filter.types]
@@ -457,7 +459,7 @@ class Query:
 
     @strawberry.field
     async def edges(self, mission_id: str) -> List[Edge]:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=60.0) as client:
             response = await client.get(f"{GRAPH_SERVICE_URL}/api/v1/missions/{mission_id}/edges")
             if response.status_code == 200:
                 data = response.json()
@@ -473,7 +475,7 @@ class Query:
 
     @strawberry.field
     async def graph_stats(self, mission_id: str) -> Optional[GraphStats]:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=60.0) as client:
             response = await client.get(f"{GRAPH_SERVICE_URL}/api/v1/missions/{mission_id}/stats")
             if response.status_code == 200:
                 data = response.json()
@@ -487,7 +489,7 @@ class Query:
 
     @strawberry.field
     async def attack_paths(self, mission_id: str, top: int = 5) -> List[AttackPath]:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=60.0) as client:
             payload = {"mission_id": mission_id, "node_types": ["ATTACK_PATH"], "limit": top}
             response = await client.post(f"{GRAPH_SERVICE_URL}/api/v1/nodes/query", json=payload)
             if response.status_code == 200:
@@ -511,7 +513,7 @@ class Query:
         types: Optional[List[NodeType]] = None
     ) -> List[Node]:
         """Query workflow-specific nodes (AGENT_RUN, TOOL_CALL, LLM_REASONING)"""
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=60.0) as client:
             # Default to all workflow types if none specified
             workflow_types = ["AGENT_RUN", "TOOL_CALL", "LLM_REASONING"]
             if types:
@@ -541,7 +543,7 @@ class Query:
     @strawberry.field
     async def workflow_layout(self, mission_id: str) -> strawberry.scalars.JSON:
         """Get saved workflow layout for a mission"""
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=60.0) as client:
             response = await client.get(f"{GRAPH_SERVICE_URL}/api/v1/layouts/{mission_id}")
             if response.status_code == 200:
                 return response.json()
@@ -571,7 +573,7 @@ class Mutation:
 
     @strawberry.mutation
     async def cancel_mission(self, id: str) -> bool:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=60.0) as client:
             response = await client.post(f"{ORCHESTRATOR_URL}/api/v1/missions/{id}/cancel")
             return response.status_code == 200
 
@@ -585,7 +587,7 @@ class Mutation:
         pan_y: float = 0
     ) -> bool:
         """Save workflow layout positions for a mission"""
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=60.0) as client:
             payload = {
                 "positions": positions,
                 "zoom": zoom,

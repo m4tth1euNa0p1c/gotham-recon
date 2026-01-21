@@ -1,27 +1,72 @@
 /**
  * Service Configuration
  * Centralized configuration for all backend services
- * Uses relative paths to leverage Next.js rewrites for Docker compatibility
+ *
+ * In Docker deployments:
+ * - UI container runs on port 3000
+ * - BFF Gateway on port 8080 (exposed to host)
+ * - Graph Service on port 8001 (exposed to host)
+ * - Orchestrator on port 8000 (exposed to host)
+ *
+ * Browser clients connect directly to localhost:PORT for each service.
+ * This avoids the need for complex proxying.
  */
 
 // Detect if we're running in browser or server
 const isBrowser = typeof window !== 'undefined';
-const origin = isBrowser ? window.location.origin : '';
+
+// Get the hostname - in Docker, browser sees localhost; server sees container names
+const getHostname = (): string => {
+  if (isBrowser) {
+    // In browser, use current hostname (typically localhost)
+    return window.location.hostname;
+  }
+  return 'localhost';
+};
+
+// Helper to get WebSocket URL
+const getWsUrl = (httpUrl: string): string => {
+  return httpUrl.replace('http://', 'ws://').replace('https://', 'wss://');
+};
+
+// Base URLs for services
+// In browser: connect directly to exposed ports on localhost
+// On server: connect via Docker internal network
+const hostname = getHostname();
 
 export const ServiceConfig = {
-  // API Endpoints - Use relative paths for browser (Next.js rewrites handle routing)
-  // Fall back to localhost for direct development
-  BFF_GATEWAY: process.env.NEXT_PUBLIC_BFF_URL || (isBrowser ? origin : 'http://localhost:8080'),
-  GRAPH_SERVICE: process.env.NEXT_PUBLIC_GRAPH_URL || 'http://localhost:8001',
-  ORCHESTRATOR: process.env.NEXT_PUBLIC_ORCHESTRATOR_URL || (isBrowser ? `${origin}/api` : 'http://localhost:8000'),
+  // BFF Gateway - handles GraphQL and SSE
+  BFF_GATEWAY: process.env.NEXT_PUBLIC_BFF_URL ||
+    (isBrowser ? `http://${hostname}:8080` : 'http://bff-gateway:8080'),
 
-  // GraphQL - Use relative path in browser to leverage Next.js rewrite
-  GRAPHQL_HTTP: process.env.NEXT_PUBLIC_GRAPHQL_URL || (isBrowser ? `${origin}/graphql` : 'http://localhost:8080/graphql'),
-  GRAPHQL_WS: process.env.NEXT_PUBLIC_GRAPHQL_WS_URL || (isBrowser ? `${origin.replace('http', 'ws')}/graphql` : 'ws://localhost:8080/graphql'),
+  // Graph Service - direct access for WebSocket
+  GRAPH_SERVICE: process.env.NEXT_PUBLIC_GRAPH_URL ||
+    (isBrowser ? `http://${hostname}:8001` : 'http://graph-service:8001'),
 
-  // WebSocket Endpoints - For SSE/WebSocket connections
-  WS_GRAPH: process.env.NEXT_PUBLIC_GRAPH_WS_URL || 'ws://localhost:8001',
-  WS_ORCHESTRATOR: process.env.NEXT_PUBLIC_ORCHESTRATOR_WS_URL || 'ws://localhost:8000',
+  // Orchestrator - direct access for WebSocket
+  ORCHESTRATOR: process.env.NEXT_PUBLIC_ORCHESTRATOR_URL ||
+    (isBrowser ? `http://${hostname}:8000` : 'http://recon-orchestrator:8000'),
+
+  // GraphQL HTTP endpoint - connects to BFF Gateway
+  GRAPHQL_HTTP: process.env.NEXT_PUBLIC_GRAPHQL_URL ||
+    (isBrowser ? `http://${hostname}:8080/graphql` : 'http://bff-gateway:8080/graphql'),
+
+  // GraphQL WebSocket - connects to BFF Gateway
+  GRAPHQL_WS: process.env.NEXT_PUBLIC_GRAPHQL_WS_URL ||
+    (isBrowser ? `ws://${hostname}:8080/graphql` : 'ws://bff-gateway:8080/graphql'),
+
+  // SSE Events endpoint - connects to BFF Gateway
+  SSE_EVENTS: (missionId: string) => {
+    const base = process.env.NEXT_PUBLIC_BFF_URL ||
+      (isBrowser ? `http://${hostname}:8080` : 'http://bff-gateway:8080');
+    return `${base}/api/v1/sse/events/${missionId}`;
+  },
+
+  // WebSocket Endpoints - For direct WebSocket connections
+  WS_GRAPH: process.env.NEXT_PUBLIC_GRAPH_WS_URL ||
+    (isBrowser ? `ws://${hostname}:8001` : 'ws://graph-service:8001'),
+  WS_ORCHESTRATOR: process.env.NEXT_PUBLIC_ORCHESTRATOR_WS_URL ||
+    (isBrowser ? `ws://${hostname}:8000` : 'ws://recon-orchestrator:8000'),
 
   // Feature Flags
   ENABLE_LIVE_MODE: process.env.NEXT_PUBLIC_ENABLE_LIVE_MODE !== 'false',

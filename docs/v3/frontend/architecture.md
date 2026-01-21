@@ -1,12 +1,61 @@
-# Frontend Architecture - Gotham UI v3.2
+# Frontend Architecture - Gotham UI v3.2.1
 
 > **Documentation de l'interface utilisateur Next.js**
 >
-> Dernière mise à jour: Décembre 2025 (v3.2)
+> Dernière mise à jour: Décembre 2025 (v3.2.1)
 
 ---
 
-## Changelog v3.2
+## Changelog v3.2.1
+
+### Service Configuration - Direct URL Access
+
+**Problème résolu:** L'UI ne pouvait pas communiquer avec les services backend via les rewrites Next.js en mode standalone.
+
+**Solution:** Configuration directe vers les ports Docker exposés:
+
+```typescript
+// src/services/config.ts
+export const ServiceConfig = {
+  // Browser clients connect directly to exposed ports
+  BFF_GATEWAY: isBrowser ? `http://${hostname}:8080` : 'http://bff-gateway:8080',
+  GRAPHQL_HTTP: isBrowser ? `http://${hostname}:8080/graphql` : 'http://bff-gateway:8080/graphql',
+
+  // SSE Events - absolute URL for browser
+  SSE_EVENTS: (missionId: string) => {
+    const base = isBrowser ? `http://${hostname}:8080` : 'http://bff-gateway:8080';
+    return `${base}/api/v1/sse/events/${missionId}`;
+  },
+};
+```
+
+### Bug Fixes - Workflow Components
+
+| Composant | Bug | Fix |
+|-----------|-----|-----|
+| **WorkflowHierarchy.tsx:391** | `asset.label.substring()` sur undefined | Ajout fallback: `asset.label \|\| asset.id \|\| 'Asset'` |
+| **AssetMap.tsx:285** | `node.id.substring()` sur undefined | Ajout fallback: `node.id \|\| ''` |
+| **AgentPipeline.tsx:141** | `agent.data.model.split()` sur undefined | Ajout fallback: `(agent.data.model \|\| '').split()` |
+
+### Next.js Configuration
+
+Ajout des rewrites pour proxy API (backup si direct access échoue):
+
+```typescript
+// next.config.ts
+async rewrites() {
+  return {
+    beforeFiles: [
+      { source: "/graphql", destination: `${bffGatewayUrl}/graphql` },
+      { source: "/api/v1/sse/events/:missionId", destination: `${bffGatewayUrl}/api/v1/sse/events/:missionId` },
+    ],
+  };
+}
+```
+
+---
+
+## Changelog v3.2.0
 
 ### AssetGraph Improvements
 

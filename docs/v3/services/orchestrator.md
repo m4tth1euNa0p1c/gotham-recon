@@ -4,11 +4,47 @@
 >
 > Port: 8000 | Base URL: `http://localhost:8000`
 >
-> Version: 3.2.0 | Dernière mise à jour: Décembre 2025
+> Version: 3.2.1 | Dernière mise à jour: Décembre 2025
 
 ---
 
-## Changelog v3.2
+## Changelog v3.2.1
+
+### Nuclei Vulnerability Scanning
+
+| Feature | Description |
+|---------|-------------|
+| **NucleiTool** | Intégration complète de Nuclei pour la détection de vulnérabilités |
+| **Template Support** | Support des templates `cves`, `exposures`, `misconfiguration`, `vulnerabilities` |
+| **Severity Mapping** | Mapping automatique des sévérités (CRITICAL → 9.0, HIGH → 7.0, etc.) |
+| **CVSS Scoring** | Score CVSS calculé automatiquement pour chaque vulnérabilité |
+
+### Outil Nuclei dans Docker
+
+Le Dockerfile inclut maintenant Nuclei:
+
+```dockerfile
+# Install Nuclei for vulnerability scanning
+RUN wget -q https://github.com/projectdiscovery/nuclei/releases/download/v3.3.7/nuclei_3.3.7_linux_amd64.zip -O /tmp/nuclei.zip \
+    && unzip -q /tmp/nuclei.zip -d /usr/local/bin/ \
+    && chmod +x /usr/local/bin/nuclei \
+    && rm /tmp/nuclei.zip
+
+# Download Nuclei templates
+RUN mkdir -p /root/nuclei-templates \
+    && nuclei -update-templates -silent || true
+```
+
+### Known Limitations
+
+| Issue | Description | Workaround |
+|-------|-------------|------------|
+| **Single Worker** | Uvicorn avec 1 worker bloque pendant l'exécution CrewAI | Timeout BFF augmenté à 60s |
+| **API Latency** | API peut être lente pendant une mission active | Retry automatique côté client |
+
+---
+
+## Changelog v3.2.0
 
 ### Reflection Architecture Integration
 

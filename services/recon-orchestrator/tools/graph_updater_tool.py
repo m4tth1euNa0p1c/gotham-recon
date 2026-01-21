@@ -4,9 +4,23 @@ Updates vulnerability status and evidence in the graph-service
 """
 import json
 import httpx
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Union
 from crewai.tools import BaseTool
-from pydantic import Field
+from pydantic import Field, BaseModel
+
+
+class GraphUpdaterToolSchema(BaseModel):
+    """Schema for GraphUpdaterTool with all optional fields properly marked."""
+    action: str = Field(default="update_vuln_status", description="Action: 'update_vuln_status' | 'add_evidence' | 'link_tool_call' | 'create_vuln'")
+    mission_id: str = Field(default="", description="The mission ID")
+    vuln_id: Optional[str] = Field(default="", description="Vulnerability node ID (for update/link actions)")
+    target_id: Optional[str] = Field(default="", description="Target node ID (for create_vuln action)")
+    status: Optional[str] = Field(default="", description="Status: CONFIRMED, LIKELY, FALSE_POSITIVE, MITIGATED")
+    evidence: Optional[str] = Field(default="[]", description="JSON array of evidence objects")
+    tool_call_id: Optional[str] = Field(default="", description="Tool call ID for linking")
+    attack_type: Optional[str] = Field(default="", description="Attack type for create_vuln")
+    title: Optional[str] = Field(default="", description="Title for create_vuln")
+    risk_score: Optional[int] = Field(default=0, description="Risk score for create_vuln (0-100)")
 
 
 class GraphUpdaterTool(BaseTool):
@@ -19,12 +33,19 @@ class GraphUpdaterTool(BaseTool):
 
     Usage:
     - action: 'update_vuln_status' | 'add_evidence' | 'link_tool_call' | 'create_vuln'
-    - mission_id: The mission ID
-    - vuln_id: Vulnerability node ID (for update/link actions)
-    - Additional params based on action
+    - mission_id: The mission ID (required)
+    - vuln_id: Vulnerability node ID (optional, for update/link actions)
+    - target_id: Target node ID (optional, for create_vuln)
+    - status: CONFIRMED | LIKELY | FALSE_POSITIVE | MITIGATED (optional)
+    - evidence: JSON string of evidence array (optional)
+    - tool_call_id: Tool call ID for linking (optional)
+    - attack_type: Attack type for create_vuln (optional)
+    - title: Vulnerability title (optional)
+    - risk_score: Risk score 0-100 (optional)
 
     Returns update result."""
 
+    args_schema: type[BaseModel] = GraphUpdaterToolSchema
     graph_service_url: str = Field(default="http://graph-service:8001")
     timeout: float = Field(default=30.0)
 
@@ -32,14 +53,14 @@ class GraphUpdaterTool(BaseTool):
         self,
         action: str = "update_vuln_status",
         mission_id: str = "",
-        vuln_id: str = "",
-        target_id: str = "",
-        status: str = "",
-        evidence: str = "[]",
-        tool_call_id: str = "",
-        attack_type: str = "",
-        title: str = "",
-        risk_score: int = 0,
+        vuln_id: Optional[str] = "",
+        target_id: Optional[str] = "",
+        status: Optional[str] = "",
+        evidence: Optional[str] = "[]",
+        tool_call_id: Optional[str] = "",
+        attack_type: Optional[str] = "",
+        title: Optional[str] = "",
+        risk_score: Optional[int] = 0,
     ) -> str:
         """
         Execute a graph update action.
@@ -308,6 +329,15 @@ class GraphUpdaterTool(BaseTool):
         }, indent=2)
 
 
+class BulkGraphUpdaterToolSchema(BaseModel):
+    """Schema for BulkGraphUpdaterTool with flexible updates field."""
+    updates: Union[str, List[Dict[str, Any]]] = Field(
+        default="[]",
+        description="JSON array of update objects OR list of dicts. Each: {vuln_id, status, evidence, tool_call_id}"
+    )
+    mission_id: str = Field(default="", description="The mission ID")
+
+
 class BulkGraphUpdaterTool(BaseTool):
     """
     Tool for bulk updating vulnerability statuses from verification results.
@@ -317,35 +347,46 @@ class BulkGraphUpdaterTool(BaseTool):
     description: str = """Bulk update vulnerability statuses from verification results.
 
     Usage:
-    - updates: JSON array of update objects
-    - mission_id: The mission ID
+    - updates: JSON array string OR list of update objects
+    - mission_id: The mission ID (required)
 
-    Each update should have: vuln_id, status, evidence, tool_call_id (optional)
+    Each update object should have:
+    - vuln_id: Vulnerability node ID (required)
+    - status: CONFIRMED | LIKELY | FALSE_POSITIVE | MITIGATED (required)
+    - evidence: Evidence array (optional)
+    - tool_call_id: Tool call ID (optional)
 
     Returns summary of updates."""
 
+    args_schema: type[BaseModel] = BulkGraphUpdaterToolSchema
     graph_service_url: str = Field(default="http://graph-service:8001")
     timeout: float = Field(default=60.0)
 
     def _run(
         self,
-        updates: str = "[]",
+        updates: Union[str, List[Dict[str, Any]]] = "[]",
         mission_id: str = ""
     ) -> str:
         """
         Execute bulk updates.
 
         Args:
-            updates: JSON array of update configs [{vuln_id, status, evidence, tool_call_id}, ...]
+            updates: JSON array or list of update configs [{vuln_id, status, evidence, tool_call_id}, ...]
             mission_id: Mission ID
         """
         if not mission_id:
             return json.dumps({"error": "mission_id is required"})
 
+        # Handle both string (JSON) and list inputs
         try:
-            update_list = json.loads(updates) if isinstance(updates, str) else updates
+            if isinstance(updates, str):
+                update_list = json.loads(updates)
+            elif isinstance(updates, list):
+                update_list = updates
+            else:
+                return json.dumps({"error": f"Invalid updates type: {type(updates).__name__}. Expected string or list."})
         except json.JSONDecodeError:
-            return json.dumps({"error": "Invalid updates JSON"})
+            return json.dumps({"error": "Invalid updates JSON string"})
 
         if not update_list:
             return json.dumps({"error": "No updates provided", "results": []})

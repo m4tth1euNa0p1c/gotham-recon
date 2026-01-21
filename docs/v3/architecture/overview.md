@@ -1,8 +1,13 @@
-# Architecture Overview - Recon Gotham v3.2
+# Architecture Overview - Recon Gotham v3.2.1
 
 ## Introduction
 
-Recon Gotham v3.2 est une plateforme de reconnaissance offensive automatisée basée sur une architecture microservices event-driven. Elle combine l'intelligence artificielle (agents CrewAI) avec des outils de sécurité traditionnels pour cartographier la surface d'attaque de domaines web.
+Recon Gotham v3.2.1 est une plateforme de reconnaissance offensive automatisée basée sur une architecture microservices event-driven. Elle combine l'intelligence artificielle (agents CrewAI) avec des outils de sécurité traditionnels pour cartographier la surface d'attaque de domaines web.
+
+**Nouveautés v3.2.1:**
+- **BFF Gateway Reliability** - Timeout HTTP augmenté à 60s, logging amélioré
+- **Frontend Docker Fixes** - Support Next.js standalone mode avec URLs directes
+- **Nuclei Integration** - Scanner de vulnérabilités intégré au Verification phase
 
 **Nouveautés v3.2:**
 - **Reflection Architecture** - Auto-validation et enrichissement des résultats
@@ -458,6 +463,68 @@ def is_in_scope(hostname: str, target_domain: str) -> bool:
 
 ---
 
+## Limitations Connues (v3.2.1)
+
+### Orchestrator Single Worker
+
+Le service Orchestrator utilise un seul worker uvicorn, ce qui cause des blocages temporaires pendant l'exécution des missions CrewAI:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│             ORCHESTRATOR BLOCKING BEHAVIOR                   │
+│                                                              │
+│  Client Request ──▶ Uvicorn Worker ──▶ CrewAI Execution     │
+│                           │                  │               │
+│                           │    BLOCKED       │               │
+│                           │    (30-60s)      ▼               │
+│  New Request ─────▶       X              Mission Running     │
+│  (waits/timeout)                             │               │
+│                           │                  │               │
+│                           ◄──────────────────┘               │
+│                           │                                  │
+│  Response ◄───────────────┘                                  │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Impact:**
+- Health checks peuvent échouer (container marqué "unhealthy")
+- BFF Gateway reçoit des ReadTimeout (mitigé avec timeout 60s)
+- Nouvelles requêtes doivent attendre
+
+**Mitigation v3.2.1:**
+- BFF timeout augmenté à 60s
+- Health check configuré avec interval/timeout généreux
+- UI gère gracieusement les timeouts
+
+**Solution future (v3.3):**
+- Background task pour l'exécution CrewAI
+- Multiple workers avec queue de jobs
+
+### Frontend Docker Networking
+
+Le frontend Next.js en mode standalone ne supporte pas les rewrites at runtime:
+
+```
+┌───────────────────────────────────────────────────────────┐
+│               DOCKER NETWORKING PATTERN                    │
+│                                                            │
+│  Browser (localhost)              Docker Network           │
+│  ┌────────────────┐              ┌────────────────────┐   │
+│  │  gotham-ui     │──────X──────▶│   bff-gateway      │   │
+│  │  :3000         │  rewrites    │   internal:8080    │   │
+│  └────────────────┘  (broken)    └────────────────────┘   │
+│         │                                   ▲              │
+│         │                                   │              │
+│         │    Direct URL                     │              │
+│         └──────────────────────────────────►│              │
+│              http://localhost:8080                         │
+└───────────────────────────────────────────────────────────┘
+```
+
+**Solution v3.2.1:** ServiceConfig détecte l'environnement browser et utilise des URLs directes vers les ports Docker exposés au lieu de Next.js rewrites.
+
+---
+
 ## Observabilité
 
 ### Logging
@@ -514,8 +581,27 @@ Tous les services exposent `/health`:
 
 1. **v3.1**: ✅ POC Robustness (Event Envelope v2, Idempotence, SSE Reconnect)
 2. **v3.2**: ✅ Reflection Architecture + UI Fixes
-3. **v3.3**: Support multi-tenant + API publique OAuth2
-4. **v4.0**: Architecture distribuée complète
+3. **v3.2.1**: ✅ Reliability & Docker Fixes
+4. **v3.3**: Support multi-tenant + API publique OAuth2
+5. **v4.0**: Architecture distribuée complète
+
+### v3.2.1 Implémenté
+
+- [x] **BFF Gateway Reliability**
+  - [x] HTTP timeout augmenté de 10s à 60s (orchestrator lent pendant CrewAI)
+  - [x] Enhanced error logging avec type d'exception et traceback
+  - [x] Meilleure gestion reconnexion Kafka après restart
+- [x] **Frontend Docker Fixes**
+  - [x] ServiceConfig avec URLs directes vers ports Docker exposés
+  - [x] Fix Next.js standalone mode (rewrites non supportés at runtime)
+  - [x] Null-safe substring/split dans WorkflowHierarchy, AssetMap, AgentPipeline
+- [x] **Nuclei Integration**
+  - [x] NucleiTool avec exécution subprocess
+  - [x] Support templates et severities configurables
+  - [x] Parsing JSON output vers vulnérabilités graph
+- [x] **Documentation**
+  - [x] Troubleshooting section pour Kafka, BFF timeout, UI issues
+  - [x] Known limitations documentées (single worker uvicorn)
 
 ### v3.2 Implémenté
 

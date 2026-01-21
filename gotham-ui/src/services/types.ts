@@ -80,8 +80,16 @@ export type WorkflowEventType =
     | 'tool_called'
     | 'tool_finished'
     | 'asset_mutation'
+    | 'node_added'
+    | 'NODE_ADDED'
+    | 'node_updated'
+    | 'NODE_UPDATED'
     | 'SNAPSHOT'
-    | 'snapshot';
+    | 'snapshot'
+    | 'mission_completed'
+    | 'mission_finished'
+    | 'MISSION_COMPLETED'
+    | 'MISSION_FINISHED';
 
 export interface WorkflowEvent {
     type: WorkflowEventType;

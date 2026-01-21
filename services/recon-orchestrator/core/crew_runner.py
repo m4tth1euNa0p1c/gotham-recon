@@ -57,6 +57,13 @@ from .events import (
 from .llm_client import get_llm_client
 from .graph_client import GraphClient, publish_discovered_assets
 
+# Import iterative scanner for comprehensive reconnaissance
+try:
+    from .iterative_scanner import run_iterative_scan, IterativeScanner
+    ITERATIVE_SCANNER_AVAILABLE = True
+except ImportError:
+    ITERATIVE_SCANNER_AVAILABLE = False
+
 # Import CrewAI tools
 from tools import (
     SubfinderTool,
@@ -178,8 +185,9 @@ class CrewMissionRunner:
             "issues_found": 0
         }
 
-        emit_log(self.mission_id, "INFO", f"CrewAI Mission Runner V2.1 initialized for {target_domain}", "init")
+        emit_log(self.mission_id, "INFO", f"CrewAI Mission Runner V3.0 initialized for {target_domain}", "init")
         emit_log(self.mission_id, "INFO", f"Tools available: {list(self.tools.keys())}", "init")
+        emit_log(self.mission_id, "INFO", f"Iterative scanner: {ITERATIVE_SCANNER_AVAILABLE}", "init")
         emit_log(self.mission_id, "INFO", f"Reflection enabled: {REFLECTION_AVAILABLE}", "init")
 
     def check_llm_available(self) -> bool:
@@ -316,6 +324,7 @@ class CrewMissionRunner:
 
             # Publish endpoints to graph-service
             endpoints_added = 0
+            hypotheses_created = 0
             for item in wb_data:
                 full_url = item.get("path") or item.get("url")
                 if full_url:
@@ -326,11 +335,14 @@ class CrewMissionRunner:
                     if host and (host.endswith(self.target_domain) or host == self.target_domain):
                         # Ensure subdomain exists
                         await self.graph_client.add_subdomain(host, source="wayback")
-                        # Add endpoint
-                        await self.graph_client.add_endpoint(path, method="GET", category="WAYBACK")
-                        endpoints_added += 1
+                        # Add endpoint (will filter external URLs)
+                        if await self.graph_client.add_endpoint(path, method="GET", category="WAYBACK"):
+                            endpoints_added += 1
+                            # Generate hypotheses based on path patterns
+                            hyp_count = await self.graph_client.generate_hypotheses_from_path(path)
+                            hypotheses_created += hyp_count
 
-            emit_log(self.mission_id, "INFO", f"Published {endpoints_added} Wayback endpoints to graph", "passive_recon")
+            emit_log(self.mission_id, "INFO", f"Published {endpoints_added} Wayback endpoints, {hypotheses_created} hypotheses to graph", "passive_recon")
             return wb_data
 
         except Exception as e:
@@ -430,19 +442,23 @@ class CrewMissionRunner:
 
             # Count endpoints found in JS
             js_endpoints = 0
+            hypotheses_created = 0
             for item in js_data:
                 js_info = item.get("js", {})
                 endpoints = js_info.get("endpoints", [])
-                js_endpoints += len(endpoints)
 
                 # Publish JS-discovered endpoints
                 for ep in endpoints:
                     path = ep.get("path")
                     method = ep.get("method", "GET")
                     if path:
-                        await self.graph_client.add_endpoint(path, method=method, category="JS_INTEL")
+                        if await self.graph_client.add_endpoint(path, method=method, category="JS_INTEL"):
+                            js_endpoints += 1
+                            # Generate hypotheses based on path patterns
+                            hyp_count = await self.graph_client.generate_hypotheses_from_path(path)
+                            hypotheses_created += hyp_count
 
-            emit_log(self.mission_id, "INFO", f"JS mining found {js_endpoints} endpoints", "active_recon")
+            emit_log(self.mission_id, "INFO", f"JS mining found {js_endpoints} endpoints, {hypotheses_created} hypotheses", "active_recon")
             emit_tool_result(self.mission_id, "js_miner", result_count=js_endpoints, success=True)
 
             return js_data
@@ -471,13 +487,17 @@ class CrewMissionRunner:
 
             # Publish crawled endpoints
             endpoints_added = 0
+            hypotheses_created = 0
             for item in html_data:
                 path = item.get("path") or item.get("url")
                 if path:
-                    await self.graph_client.add_endpoint(path, method="GET", category="HTML_CRAWL")
-                    endpoints_added += 1
+                    if await self.graph_client.add_endpoint(path, method="GET", category="HTML_CRAWL"):
+                        endpoints_added += 1
+                        # Generate hypotheses based on path patterns
+                        hyp_count = await self.graph_client.generate_hypotheses_from_path(path)
+                        hypotheses_created += hyp_count
 
-            emit_log(self.mission_id, "INFO", f"HTML crawl found {endpoints_added} endpoints", "active_recon")
+            emit_log(self.mission_id, "INFO", f"HTML crawl found {endpoints_added} endpoints, {hypotheses_created} hypotheses", "active_recon")
             emit_tool_result(self.mission_id, "html_crawler", result_count=endpoints_added, success=True)
 
             return html_data
@@ -628,22 +648,35 @@ Sample HTTP Services: {json.dumps(self.http_services[:5], indent=2) if self.http
             result = await asyncio.to_thread(intel_crew.kickoff)
             emit_agent_finished(self.mission_id, "endpoint_intel", "Completed", time.time() - phase_start)
 
-            # Parse result and create hypotheses
+            # Parse result and create hypotheses from LLM output
             result_str = str(result)
+            llm_hypotheses_count = 0
             try:
                 intel_data = json.loads(extract_json(result_str))
                 if isinstance(intel_data, dict) and "endpoints" in intel_data:
                     for ep in intel_data["endpoints"]:
-                        # Create hypotheses
+                        # Create hypotheses from LLM analysis
                         for hyp in ep.get("hypotheses", []):
-                            await self.graph_client.add_hypothesis(
+                            if await self.graph_client.add_hypothesis(
                                 title=hyp.get("title", "Unknown"),
                                 attack_type=hyp.get("attack_type", "UNKNOWN"),
                                 target_id=ep.get("endpoint_id", "unknown"),
                                 confidence=hyp.get("confidence", 0.5)
+                            ):
+                                llm_hypotheses_count += 1
+                            # Also create vulnerability for tracking
+                            await self.graph_client.add_vulnerability(
+                                vuln_type=hyp.get("attack_type", "UNKNOWN"),
+                                target_id=ep.get("endpoint_id", "unknown"),
+                                title=hyp.get("title", "Unknown"),
+                                risk_score=int(ep.get("risk_score", 50)),
+                                status="THEORETICAL"
                             )
-            except:
-                pass
+                emit_log(self.mission_id, "INFO", f"Created {llm_hypotheses_count} hypotheses from LLM analysis", "endpoint_intel")
+            except json.JSONDecodeError as je:
+                emit_log(self.mission_id, "WARNING", f"Failed to parse LLM output as JSON: {je}", "endpoint_intel")
+            except Exception as parse_err:
+                emit_log(self.mission_id, "WARNING", f"Error processing LLM hypotheses: {parse_err}", "endpoint_intel")
 
         except Exception as e:
             emit_log(self.mission_id, "ERROR", f"Intel phase failed: {e}", "endpoint_intel")
@@ -974,48 +1007,115 @@ High-value targets (HTTP services):
         # Wrap string in dict
         return {"raw": result_str[:1000]}
 
+    async def run_comprehensive_scan(self) -> Dict[str, Any]:
+        """
+        Run comprehensive iterative scan on ALL discovered subdomains.
+        This replaces the shallow active recon with deep scanning of every subdomain.
+        """
+        if not ITERATIVE_SCANNER_AVAILABLE:
+            emit_log(self.mission_id, "WARNING", "Iterative scanner not available", "mission")
+            return {"phase": "comprehensive_scan", "skipped": True}
+
+        if not self.subdomains:
+            emit_log(self.mission_id, "WARNING", "No subdomains to scan", "mission")
+            return {"phase": "comprehensive_scan", "skipped": True, "reason": "no_subdomains"}
+
+        emit_agent_started(self.mission_id, "comprehensive_scanner", f"Deep scanning {len(self.subdomains)} subdomains")
+        phase_start = time.time()
+
+        try:
+            # Run iterative scan on ALL subdomains
+            scan_result = await run_iterative_scan(
+                mission_id=self.mission_id,
+                target_domain=self.target_domain,
+                subdomains=list(self.subdomains),
+                graph_client=self.graph_client,
+                tools=self.tools,
+                mode=self.mode,
+            )
+
+            # Update internal state from scan results
+            if scan_result and "scan_results" in scan_result:
+                for sub, data in scan_result.get("scan_results", {}).items():
+                    # Add HTTP services
+                    if data.get("final_url"):
+                        self.http_services.append({
+                            "subdomain": sub,
+                            "url": data["final_url"],
+                            "status_code": data.get("status_code"),
+                            "technologies": data.get("technologies", []),
+                            "title": data.get("title"),
+                        })
+
+                    # Add endpoints
+                    for ep in data.get("endpoints", []):
+                        self.endpoints.append(ep)
+
+            duration = time.time() - phase_start
+            emit_agent_finished(self.mission_id, "comprehensive_scanner", "Completed", duration)
+
+            return {
+                "phase": "comprehensive_scan",
+                "duration": duration,
+                "stats": scan_result.get("stats", {}),
+                "subdomains_scanned": scan_result.get("subdomains_total", 0),
+                "live_services": scan_result.get("live_services", 0),
+            }
+
+        except Exception as e:
+            emit_log(self.mission_id, "ERROR", f"Comprehensive scan failed: {e}", "mission")
+            return {"phase": "comprehensive_scan", "error": str(e)}
+
     async def run_full_mission(self) -> Dict:
         """
-        Run complete reconnaissance mission with hybrid approach:
-        - Direct tool calls for data collection
+        Run complete reconnaissance mission V3.0 with:
+        - Comprehensive iterative scanning of ALL subdomains
+        - Deep endpoint discovery (not just Wayback)
+        - Technology fingerprinting with evidence
+        - Vulnerability detection with proof
         - LLM agents for analysis
         """
         self.start_time = time.time()
 
-        emit_mission_status(self.mission_id, "running", f"Starting hybrid mission on {self.target_domain}")
-        emit_log(self.mission_id, "INFO", f"Mission {self.mission_id} starting in {self.mode} mode (V2.0 Hybrid)", "mission")
+        emit_mission_status(self.mission_id, "running", f"Starting comprehensive mission on {self.target_domain}")
+        emit_log(self.mission_id, "INFO", f"Mission {self.mission_id} starting in {self.mode} mode (V3.0 Comprehensive)", "mission")
 
         # Check LLM availability (not required for tool-only phases)
         llm_available = self.check_llm_available()
 
         try:
-            # Phase 1: Passive Recon (Direct tool calls)
-            emit_log(self.mission_id, "INFO", "=== PHASE 1: PASSIVE RECON ===", "mission")
+            # Phase 1: Initial Passive Discovery (Subfinder + Wayback)
+            emit_log(self.mission_id, "INFO", "=== PHASE 1: PASSIVE DISCOVERY ===", "mission")
             passive_result = await self.run_passive_phase()
 
-            # Phase 2: Active Recon (Direct tool calls)
-            emit_log(self.mission_id, "INFO", "=== PHASE 2: ACTIVE RECON ===", "mission")
+            # Phase 2: COMPREHENSIVE ITERATIVE SCAN (NEW - scans ALL subdomains deeply)
+            emit_log(self.mission_id, "INFO", "=== PHASE 2: COMPREHENSIVE SCAN ===", "mission")
+            emit_log(self.mission_id, "INFO", f"Scanning {len(self.subdomains)} subdomains exhaustively...", "mission")
+            comprehensive_result = await self.run_comprehensive_scan()
+
+            # Phase 3: Active Recon (for any remaining items)
+            emit_log(self.mission_id, "INFO", "=== PHASE 3: ACTIVE RECON ===", "mission")
             active_result = await self.run_active_phase()
 
-            # Phase 3: Endpoint Intel (LLM analysis - optional)
+            # Phase 4: Endpoint Intel (LLM analysis - optional)
             if llm_available:
-                emit_log(self.mission_id, "INFO", "=== PHASE 3: ENDPOINT INTEL ===", "mission")
+                emit_log(self.mission_id, "INFO", "=== PHASE 4: ENDPOINT INTEL ===", "mission")
                 intel_result = await self.run_intel_phase()
             else:
                 emit_log(self.mission_id, "WARNING", "Skipping LLM phases - Ollama not available", "mission")
                 intel_result = {"phase": "endpoint_intel", "skipped": True}
 
-            # Phase 4: Planning (LLM analysis - optional)
+            # Phase 5: Planning (LLM analysis - optional)
             if llm_available:
-                emit_log(self.mission_id, "INFO", "=== PHASE 4: ATTACK PLANNING ===", "mission")
+                emit_log(self.mission_id, "INFO", "=== PHASE 5: ATTACK PLANNING ===", "mission")
                 planning_result = await self.run_planning_phase()
             else:
                 planning_result = {"phase": "planning", "skipped": True}
 
-            # Phase 5: Deep Verification (Lot 2.1 - requires LLM for agent reasoning)
+            # Phase 6: Deep Verification (Lot 2.1 - requires LLM for agent reasoning)
             deep_verification_result = {"phase": "deep_verification", "skipped": True}
             if llm_available and self.http_services:
-                emit_log(self.mission_id, "INFO", "=== PHASE 5: DEEP VERIFICATION ===", "mission")
+                emit_log(self.mission_id, "INFO", "=== PHASE 6: DEEP VERIFICATION ===", "mission")
                 try:
                     deep_verification_result = await self.run_deep_verification_phase()
                 except Exception as e:
@@ -1041,11 +1141,17 @@ High-value targets (HTTP services):
                     "vulns_confirmed": deep_verification_result.get("vulns_confirmed", 0),
                 }
 
+            # Build comprehensive scan summary
+            comprehensive_summary = {}
+            if isinstance(comprehensive_result, dict) and not comprehensive_result.get("skipped"):
+                comprehensive_summary = comprehensive_result.get("stats", {})
+
             summary = {
                 "subdomains": len(self.subdomains),
                 "http_services": len(self.http_services),
                 "endpoints": len(self.endpoints),
                 "dns_records": len(self.dns_records),
+                "comprehensive_scan": comprehensive_summary,  # V3.0
                 "verification": verification_summary,  # Lot 2.1
             }
 
@@ -1059,7 +1165,7 @@ High-value targets (HTTP services):
                     "reflection"
                 )
 
-            emit_log(self.mission_id, "INFO", f"Mission completed in {total_duration:.2f}s - {summary}", "mission")
+            emit_log(self.mission_id, "INFO", f"Mission V3.0 completed in {total_duration:.2f}s - {summary}", "mission")
             emit_mission_status(self.mission_id, "completed", f"Mission completed: {summary}")
 
             return {
@@ -1071,6 +1177,7 @@ High-value targets (HTTP services):
                 "reflection_stats": self.reflection_stats,  # P0.6: Include reflection metrics
                 "phases": {
                     "passive": passive_result,
+                    "comprehensive_scan": comprehensive_result,  # V3.0: Full iterative scan
                     "active": active_result,
                     "intel": intel_result,
                     "planning": planning_result,

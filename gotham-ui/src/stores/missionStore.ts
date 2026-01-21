@@ -32,14 +32,19 @@ interface MissionState {
   // Connection status
   connectionStatus: ConnectionStatus;
 
+  // Refresh tracking
+  lastRefresh: number | null;
+
   // Actions
   startMission: (input: StartMissionInput) => Promise<Mission | null>;
   cancelMission: () => Promise<boolean>;
   pauseMission: () => Promise<boolean>;
   resumeMission: () => Promise<boolean>;
   setCurrentMission: (mission: Mission | null) => void;
+  updateMissionStatus: (missionId: string, status: MissionStatus) => void;
   fetchMission: (missionId: string) => Promise<void>;
   fetchMissions: (limit?: number, offset?: number) => Promise<void>;
+  refreshMissions: () => Promise<void>;
   addLog: (log: LogEntry) => void;
   clearLogs: () => void;
   setConnectionStatus: (status: ConnectionStatus) => void;
@@ -57,6 +62,7 @@ const initialState = {
   logs: [],
   maxLogs: 500,
   connectionStatus: 'disconnected' as ConnectionStatus,
+  lastRefresh: null,
 };
 
 export const useMissionStore = create<MissionState>()(
@@ -150,6 +156,26 @@ export const useMissionStore = create<MissionState>()(
         set({ currentMission: mission });
       },
 
+      updateMissionStatus: (missionId: string, status: MissionStatus) => {
+        set(state => {
+          // Update in missions list
+          const updatedMissions = state.missions.map(m =>
+            m.id === missionId ? { ...m, status } : m
+          );
+
+          // Update current mission if it matches
+          const updatedCurrentMission =
+            state.currentMission?.id === missionId
+              ? { ...state.currentMission, status }
+              : state.currentMission;
+
+          return {
+            missions: updatedMissions,
+            currentMission: updatedCurrentMission
+          };
+        });
+      },
+
       fetchMission: async (missionId: string) => {
         set({ isLoading: true, error: null });
 
@@ -170,9 +196,24 @@ export const useMissionStore = create<MissionState>()(
             missions: result.items,
             missionsTotal: result.total,
             isLoading: false,
+            lastRefresh: Date.now(),
           });
         } catch (error) {
           set({ isLoading: false, error: (error as Error).message });
+        }
+      },
+
+      refreshMissions: async () => {
+        // Non-blocking refresh (doesn't set isLoading)
+        try {
+          const result = await MissionService.getMissions(50);
+          set({
+            missions: result.items,
+            missionsTotal: result.total,
+            lastRefresh: Date.now(),
+          });
+        } catch (error) {
+          console.error('Failed to refresh missions:', error);
         }
       },
 

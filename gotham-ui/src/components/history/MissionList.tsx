@@ -1,12 +1,16 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { format } from "date-fns";
 import { motion, AnimatePresence } from "framer-motion";
-import { Shield, Clock, ArrowRight, Activity, Trash2, AlertTriangle, X } from "lucide-react";
+import { Shield, Clock, ArrowRight, Activity, Trash2, AlertTriangle, X, RefreshCw, Loader2 } from "lucide-react";
 import { MissionService, Mission } from "@/services/MissionService";
 import { useMissionStore } from "@/stores/missionStore";
+
+// Polling interval for mission list refresh (ms)
+const POLLING_INTERVAL = 3000; // 3 seconds when missions are running
+const IDLE_POLLING_INTERVAL = 10000; // 10 seconds when idle
 
 // Confirmation Dialog Component
 function ConfirmDialog({
@@ -71,33 +75,100 @@ export default function MissionList() {
     const router = useRouter();
     const [missions, setMissions] = useState<Mission[]>([]);
     const [isLoading, setIsLoading] = useState(true);
+    const [isRefreshing, setIsRefreshing] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [deleteConfirm, setDeleteConfirm] = useState<{ type: 'mission' | 'all'; missionId?: string } | null>(null);
     const [isDeleting, setIsDeleting] = useState(false);
+    const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
 
-    // Get setCurrentMission from store to update selected mission
+    // Refs for polling
+    const pollingRef = useRef<NodeJS.Timeout | null>(null);
+    const mountedRef = useRef(true);
+
+    // Get store state and actions
     const setCurrentMission = useMissionStore((state) => state.setCurrentMission);
+    const currentMission = useMissionStore((state) => state.currentMission);
 
-    useEffect(() => {
-        loadMissions();
-    }, []);
+    // Check if any mission is running (for faster polling)
+    const hasRunningMission = missions.some(m => m.status === 'running') || currentMission?.status === 'running';
 
-    const loadMissions = async () => {
-        setIsLoading(true);
+    // Load missions function
+    const loadMissions = useCallback(async (showLoader = true) => {
+        if (showLoader) setIsLoading(true);
+        else setIsRefreshing(true);
+
         try {
             const result = await MissionService.getMissions(50);
+            if (!mountedRef.current) return;
+
             // Sort by date desc (if not already sorted by backend)
             const sorted = result.items.sort((a, b) =>
                 new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
             );
             setMissions(sorted);
+            setLastRefresh(new Date());
+            setError(null);
         } catch (err) {
             console.error("Failed to load missions:", err);
-            setError("Failed to load mission history");
+            if (mountedRef.current) {
+                setError("Failed to load mission history");
+            }
         } finally {
-            setIsLoading(false);
+            if (mountedRef.current) {
+                setIsLoading(false);
+                setIsRefreshing(false);
+            }
         }
-    };
+    }, []);
+
+    // Manual refresh
+    const handleRefresh = useCallback(() => {
+        loadMissions(false);
+    }, [loadMissions]);
+
+    // Initial load
+    useEffect(() => {
+        mountedRef.current = true;
+        loadMissions();
+
+        return () => {
+            mountedRef.current = false;
+        };
+    }, [loadMissions]);
+
+    // Polling effect - faster when missions are running
+    useEffect(() => {
+        const interval = hasRunningMission ? POLLING_INTERVAL : IDLE_POLLING_INTERVAL;
+
+        // Clear existing polling
+        if (pollingRef.current) {
+            clearInterval(pollingRef.current);
+        }
+
+        // Start new polling
+        pollingRef.current = setInterval(() => {
+            if (mountedRef.current && !isDeleting) {
+                loadMissions(false);
+            }
+        }, interval);
+
+        return () => {
+            if (pollingRef.current) {
+                clearInterval(pollingRef.current);
+            }
+        };
+    }, [hasRunningMission, loadMissions, isDeleting]);
+
+    // Also refresh when currentMission changes (new mission started from Header)
+    useEffect(() => {
+        if (currentMission) {
+            // Small delay to let backend create the mission
+            const timer = setTimeout(() => {
+                loadMissions(false);
+            }, 500);
+            return () => clearTimeout(timer);
+        }
+    }, [currentMission?.id, loadMissions]);
 
     const handleDeleteMission = useCallback(async (missionId: string) => {
         setIsDeleting(true);
@@ -158,7 +229,7 @@ export default function MissionList() {
             <div className="p-8 text-center">
                 <div className="text-red-400 mb-2">{error}</div>
                 <button
-                    onClick={loadMissions}
+                    onClick={() => loadMissions()}
                     className="text-sm text-cyan-400 hover:text-cyan-300 underline"
                 >
                     Retry
@@ -178,19 +249,43 @@ export default function MissionList() {
 
     return (
         <>
-            {/* Header with Clear All button */}
+            {/* Header with Refresh and Clear All buttons */}
             <div className="flex justify-between items-center mb-4">
-                <div className="text-sm text-slate-500">
-                    {missions.length} mission{missions.length > 1 ? 's' : ''}
+                <div className="flex items-center gap-4">
+                    <div className="text-sm text-slate-500">
+                        {missions.length} mission{missions.length > 1 ? 's' : ''}
+                    </div>
+                    {hasRunningMission && (
+                        <div className="flex items-center gap-2 px-2 py-1 bg-cyan-950/30 border border-cyan-800/50 rounded text-xs">
+                            <div className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
+                            <span className="text-cyan-400">Live updates active</span>
+                        </div>
+                    )}
+                    {lastRefresh && (
+                        <span className="text-[10px] text-slate-600">
+                            Updated {format(lastRefresh, 'HH:mm:ss')}
+                        </span>
+                    )}
                 </div>
-                <button
-                    onClick={() => setDeleteConfirm({ type: 'all' })}
-                    disabled={isDeleting}
-                    className="flex items-center gap-2 px-3 py-1.5 text-xs text-red-400 hover:text-red-300 hover:bg-red-950/30 border border-red-900/50 rounded transition-colors disabled:opacity-50"
-                >
-                    <Trash2 size={14} />
-                    Clear All Data
-                </button>
+                <div className="flex items-center gap-2">
+                    <button
+                        onClick={handleRefresh}
+                        disabled={isRefreshing}
+                        className="flex items-center gap-2 px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-slate-700/50 rounded transition-colors disabled:opacity-50"
+                        title="Refresh missions"
+                    >
+                        <RefreshCw size={14} className={isRefreshing ? 'animate-spin' : ''} />
+                        Refresh
+                    </button>
+                    <button
+                        onClick={() => setDeleteConfirm({ type: 'all' })}
+                        disabled={isDeleting}
+                        className="flex items-center gap-2 px-3 py-1.5 text-xs text-red-400 hover:text-red-300 hover:bg-red-950/30 border border-red-900/50 rounded transition-colors disabled:opacity-50"
+                    >
+                        <Trash2 size={14} />
+                        Clear All
+                    </button>
+                </div>
             </div>
 
             <div className="w-full">

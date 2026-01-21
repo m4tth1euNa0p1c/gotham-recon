@@ -186,11 +186,13 @@ export const GQL_MUTATIONS = {
 
 // Transform functions - Strawberry already returns camelCase
 export function transformMission(raw: Record<string, unknown>) {
+  // Normalize status to lowercase for consistent comparison in UI
+  const rawStatus = (raw.status as string)?.toLowerCase() || 'pending';
   return {
     id: raw.id as string,
     targetDomain: (raw.targetDomain || raw.target_domain) as string,
     mode: (raw.mode as string)?.toUpperCase(),
-    status: raw.status as string,
+    status: rawStatus,
     currentPhase: (raw.currentPhase || raw.current_phase) as string | undefined,
     createdAt: (raw.createdAt || raw.created_at) as string,
     progress: raw.progress as Record<string, unknown>,

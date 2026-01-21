@@ -89,7 +89,14 @@ class GraphQueryTool(BaseTool):
         if response.status_code != 200:
             return json.dumps({"error": f"Graph query failed: {response.status_code}"})
 
-        nodes = response.json()
+        response_data = response.json()
+        # Handle both {"nodes": [...]} and direct list formats
+        if isinstance(response_data, dict):
+            nodes = response_data.get("nodes", [])
+        elif isinstance(response_data, list):
+            nodes = response_data
+        else:
+            nodes = []
 
         # Apply filters
         vulnerabilities = []
@@ -141,7 +148,14 @@ class GraphQueryTool(BaseTool):
         if http_response.status_code != 200:
             return json.dumps({"error": f"Graph query failed: {http_response.status_code}"})
 
-        services = http_response.json()
+        services_data = http_response.json()
+        # Handle both {"nodes": [...]} and direct list formats
+        if isinstance(services_data, dict):
+            services = services_data.get("nodes", [])
+        elif isinstance(services_data, list):
+            services = services_data
+        else:
+            services = []
 
         # Get vulnerabilities
         vuln_response = client.get(
@@ -149,7 +163,14 @@ class GraphQueryTool(BaseTool):
             params={"mission_id": mission_id, "type": "VULNERABILITY", "limit": 100}
         )
 
-        vulns = vuln_response.json() if vuln_response.status_code == 200 else []
+        vulns_data = vuln_response.json() if vuln_response.status_code == 200 else {}
+        # Handle both {"nodes": [...]} and direct list formats
+        if isinstance(vulns_data, dict):
+            vulns = vulns_data.get("nodes", [])
+        elif isinstance(vulns_data, list):
+            vulns = vulns_data
+        else:
+            vulns = []
 
         # Build targets with their vulns
         targets = []
@@ -207,7 +228,14 @@ class GraphQueryTool(BaseTool):
         if response.status_code != 200:
             return json.dumps({"error": f"Graph query failed: {response.status_code}"})
 
-        services = response.json()
+        response_data = response.json()
+        # Handle both {"nodes": [...]} and direct list formats
+        if isinstance(response_data, dict):
+            services = response_data.get("nodes", [])
+        elif isinstance(response_data, list):
+            services = response_data
+        else:
+            services = []
 
         result = []
         for svc in services:
@@ -237,7 +265,14 @@ class GraphQueryTool(BaseTool):
         if response.status_code != 200:
             return json.dumps({"error": f"Graph query failed: {response.status_code}"})
 
-        endpoints = response.json()
+        response_data = response.json()
+        # Handle both {"nodes": [...]} and direct list formats
+        if isinstance(response_data, dict):
+            endpoints = response_data.get("nodes", [])
+        elif isinstance(response_data, list):
+            endpoints = response_data
+        else:
+            endpoints = []
 
         result = []
         for ep in endpoints:

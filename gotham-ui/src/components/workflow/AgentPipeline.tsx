@@ -2,45 +2,48 @@
 
 /**
  * AgentPipeline
- * Visualizes agents in a horizontal sequential pipeline with animations.
- * Agents appear sequentially as they start, with tool calls shown underneath.
- * NO MOCK DATA - populated via live WebSocket events only.
+ * Visualizes agents in a horizontal sequential pipeline with phase-colored cards.
+ *
+ * Design Specs:
+ * 1. Container: Horizontal scroll, dark bg (bg-slate-900/20), border-bottom, tracking-widest title.
+ * 2. Card: 256px wide, Glassmorphism, Industrial look.
+ *    - Header: Phase [OSINT], Activity Icon.
+ *    - Body: Agent Name, Metadata (Time/Tokens), Hexagon Icon.
+ *    - Tools: Max 3 items, Zap icon (pulsing orange if running).
+ * 3. Connection: 32px spacer, 2px line, CSS Arrow Tip.
  */
 
 import React, { useMemo, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Cpu,
-  Wrench,
-  CheckCircle,
+  Activity,
+  Zap,
+  Hexagon,
+  Clock,
+  Terminal,
+  CheckCircle2,
   XCircle,
   Loader2,
-  Clock,
-  Zap,
-  ChevronRight,
+  Cpu,
+  Wrench,
+  Timer,
 } from "lucide-react";
 import { useWorkflowStore, AgentRunNode, ToolCallNode } from "@/stores/workflowStore";
 
 // Phase order for sorting
 const PHASE_ORDER = ["OSINT", "ACTIVE", "INTEL", "VERIF", "PLANNER", "REPORT"];
 
-// Phase colors (Gotham theme)
-const PHASE_COLORS: Record<string, { bg: string; border: string; text: string }> = {
-  OSINT: { bg: "bg-cyan-500/20", border: "border-cyan-500/50", text: "text-cyan-400" },
-  ACTIVE: { bg: "bg-amber-500/20", border: "border-amber-500/50", text: "text-amber-400" },
-  INTEL: { bg: "bg-purple-500/20", border: "border-purple-500/50", text: "text-purple-400" },
-  VERIF: { bg: "bg-emerald-500/20", border: "border-emerald-500/50", text: "text-emerald-400" },
-  PLANNER: { bg: "bg-rose-500/20", border: "border-rose-500/50", text: "text-rose-400" },
-  REPORT: { bg: "bg-blue-500/20", border: "border-blue-500/50", text: "text-blue-400" },
+// Phase colors matching design specs
+const PHASE_COLORS: Record<string, { bg: string; border: string; text: string; glow: string }> = {
+  OSINT: { bg: "bg-cyan-500/10", border: "border-cyan-500/50", text: "text-cyan-400", glow: "shadow-cyan-500/20" },
+  ACTIVE: { bg: "bg-amber-500/10", border: "border-amber-500/50", text: "text-amber-400", glow: "shadow-amber-500/20" },
+  INTEL: { bg: "bg-purple-500/10", border: "border-purple-500/50", text: "text-purple-400", glow: "shadow-purple-500/20" },
+  VERIF: { bg: "bg-emerald-500/10", border: "border-emerald-500/50", text: "text-emerald-400", glow: "shadow-emerald-500/20" },
+  PLANNER: { bg: "bg-rose-500/10", border: "border-rose-500/50", text: "text-rose-400", glow: "shadow-rose-500/20" },
+  REPORT: { bg: "bg-blue-500/10", border: "border-blue-500/50", text: "text-blue-400", glow: "shadow-blue-500/20" },
 };
 
-// Status colors
-const STATUS_COLORS: Record<string, { bg: string; border: string; icon: string }> = {
-  pending: { bg: "bg-slate-600", border: "border-slate-500", icon: "text-slate-400" },
-  running: { bg: "bg-cyan-500", border: "border-cyan-400", icon: "text-cyan-300" },
-  completed: { bg: "bg-emerald-500", border: "border-emerald-400", icon: "text-emerald-300" },
-  error: { bg: "bg-red-500", border: "border-red-400", icon: "text-red-300" },
-};
+const DEFAULT_PHASE_COLORS = { bg: "bg-slate-500/10", border: "border-slate-500/50", text: "text-slate-400", glow: "shadow-slate-500/20" };
 
 // Format duration
 function formatDuration(ms?: number): string {
@@ -50,212 +53,208 @@ function formatDuration(ms?: number): string {
   return `${Math.floor(ms / 60000)}m ${Math.floor((ms % 60000) / 1000)}s`;
 }
 
+// Format timestamp
+function formatTime(timestamp?: string): string {
+  if (!timestamp) return "";
+  const date = new Date(timestamp);
+  return date.toLocaleTimeString("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+}
+
+// Status indicator component
+function StatusIndicator({ status }: { status: string }) {
+  switch (status) {
+    case "running":
+      return <Loader2 size={12} className="text-cyan-400 animate-spin" />;
+    case "completed":
+      return <CheckCircle2 size={12} className="text-emerald-400" />;
+    case "error":
+      return <XCircle size={12} className="text-red-400" />;
+    default:
+      return <Clock size={12} className="text-slate-500" />;
+  }
+}
+
+// Arrow Connection Component
+const ConnectionArrow = () => (
+  <div className="flex items-center w-8 shrink-0 relative">
+    {/* Line */}
+    <div className="w-full h-0.5 bg-slate-800" />
+    {/* Arrow Tip (CSS Square Rotated) */}
+    <div className="absolute right-0 w-2 h-2 border-t border-r border-slate-600 bg-slate-900 rotate-45 transform translate-x-[-1px]" />
+  </div>
+);
+
 // Agent card animation variants
 const agentVariants = {
-  hidden: { opacity: 0, x: -50, scale: 0.8 },
+  hidden: { opacity: 0, x: -20, scale: 0.95 },
   visible: {
     opacity: 1,
     x: 0,
     scale: 1,
-    transition: {
-      type: "spring" as const,
-      stiffness: 300,
-      damping: 25,
-      duration: 0.5,
-    },
-  },
-  exit: {
-    opacity: 0,
-    scale: 0.8,
-    transition: { duration: 0.2 },
-  },
-};
-
-// Tool card animation variants
-const toolVariants = {
-  hidden: { opacity: 0, y: -10, scale: 0.9 },
-  visible: {
-    opacity: 1,
-    y: 0,
-    scale: 1,
-    transition: {
-      type: "spring" as const,
-      stiffness: 400,
-      damping: 25,
-    },
-  },
-  exit: { opacity: 0, y: -10, scale: 0.9 },
-};
-
-// Connector line animation
-const connectorVariants = {
-  hidden: { scaleX: 0, opacity: 0 },
-  visible: {
-    scaleX: 1,
-    opacity: 1,
-    transition: {
-      duration: 0.4,
-      ease: "easeOut" as const,
-      delay: 0.2,
-    },
+    transition: { type: "spring" as const, stiffness: 300, damping: 25 },
   },
 };
 
 interface AgentCardProps {
   agent: AgentRunNode;
   tools: ToolCallNode[];
-  isLast: boolean;
-  index: number;
 }
 
-function AgentCard({ agent, tools, isLast, index }: AgentCardProps) {
+function AgentCard({ agent, tools }: AgentCardProps) {
   const phase = agent.data.phase || "OSINT";
-  const phaseColors = PHASE_COLORS[phase] || PHASE_COLORS.OSINT;
-  const statusColors = STATUS_COLORS[agent.status] || STATUS_COLORS.pending;
+  const colors = PHASE_COLORS[phase] || DEFAULT_PHASE_COLORS;
+  const isRunning = agent.status === "running";
+  const isCompleted = agent.status === "completed";
+  const isError = agent.status === "error";
 
-  // Status icon
-  const StatusIcon = () => {
-    switch (agent.status) {
-      case "running":
-        return <Loader2 size={14} className="animate-spin text-cyan-400" />;
-      case "completed":
-        return <CheckCircle size={14} className="text-emerald-400" />;
-      case "error":
-        return <XCircle size={14} className="text-red-400" />;
-      default:
-        return <Clock size={14} className="text-slate-400" />;
-    }
-  };
+  // Calculate tool stats
+  const toolsRunning = tools.filter(t => t.status === "running").length;
+  const toolsCompleted = tools.filter(t => t.status === "completed").length;
 
   return (
     <motion.div
-      className="flex items-center"
       variants={agentVariants}
       initial="hidden"
       animate="visible"
-      exit="exit"
-      layout
+      className={`
+        relative w-72 shrink-0 rounded-lg border backdrop-blur-md overflow-hidden transition-all duration-300
+        ${colors.bg} ${colors.border}
+        ${isRunning ? `ring-1 ring-${colors.text.split('-')[1]}-500/50 shadow-lg ${colors.glow}` : ""}
+      `}
     >
-      {/* Agent Card */}
-      <div className="relative flex flex-col">
-        {/* Phase Badge */}
-        <div
-          className={`absolute -top-3 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${phaseColors.bg} ${phaseColors.border} border ${phaseColors.text}`}
-        >
-          {phase}
+      {/* 1. Header */}
+      <div className={`px-3 py-2 border-b ${colors.border} flex justify-between items-center bg-slate-900/50`}>
+        <div className="flex items-center gap-2">
+          <span className={`text-[10px] font-bold tracking-wider px-1.5 py-0.5 rounded ${colors.bg} ${colors.text}`}>
+            {phase}
+          </span>
+          <StatusIndicator status={agent.status} />
         </div>
-
-        {/* Main Card */}
-        <motion.div
-          className={`relative min-w-[160px] p-4 rounded-lg border-2 backdrop-blur-sm transition-all duration-300 ${
-            agent.status === "running"
-              ? "bg-slate-900/90 border-cyan-500/70 shadow-lg shadow-cyan-500/20"
-              : agent.status === "completed"
-              ? "bg-slate-900/70 border-emerald-500/50"
-              : agent.status === "error"
-              ? "bg-slate-900/70 border-red-500/50"
-              : "bg-slate-900/50 border-slate-700"
-          }`}
-          whileHover={{ scale: 1.02 }}
-        >
-          {/* Glow effect for running agents */}
-          {agent.status === "running" && (
-            <motion.div
-              className="absolute inset-0 rounded-lg bg-cyan-500/10"
-              animate={{ opacity: [0.3, 0.6, 0.3] }}
-              transition={{ duration: 2, repeat: Infinity }}
-            />
+        <div className="flex items-center gap-2">
+          {agent.data.model && (
+            <span className="text-[9px] font-mono text-slate-500 bg-slate-800/50 px-1.5 py-0.5 rounded">
+              {(agent.data.model || '').split('/').pop()?.substring(0, 12) || agent.data.model || ''}
+            </span>
           )}
-
-          {/* Header */}
-          <div className="flex items-center gap-2 mb-2">
-            <div
-              className={`p-1.5 rounded ${statusColors.bg}/20 border ${statusColors.border}`}
-            >
-              <Cpu size={16} className={statusColors.icon} />
-            </div>
-            <StatusIcon />
-          </div>
-
-          {/* Agent Name */}
-          <h4 className="text-sm font-semibold text-white truncate">
-            {agent.data.agentName || agent.label}
-          </h4>
-
-          {/* Duration */}
-          {agent.data.duration && (
-            <div className="flex items-center gap-1 mt-1 text-xs text-slate-400">
-              <Clock size={10} />
-              <span>{formatDuration(agent.data.duration)}</span>
-            </div>
-          )}
-
-          {/* Token count */}
-          {agent.data.tokens && (
-            <div className="flex items-center gap-1 mt-0.5 text-xs text-slate-500">
-              <Zap size={10} />
-              <span>{agent.data.tokens.toLocaleString()} tokens</span>
-            </div>
-          )}
-        </motion.div>
-
-        {/* Tool calls underneath */}
-        <AnimatePresence mode="popLayout">
-          {tools.length > 0 && (
-            <motion.div
-              className="mt-2 space-y-1"
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: "auto" }}
-              exit={{ opacity: 0, height: 0 }}
-            >
-              {tools.slice(0, 5).map((tool) => (
-                <motion.div
-                  key={tool.id}
-                  variants={toolVariants}
-                  initial="hidden"
-                  animate="visible"
-                  exit="exit"
-                  className={`flex items-center gap-2 px-2 py-1 rounded text-xs border ${
-                    tool.status === "running"
-                      ? "bg-amber-500/10 border-amber-500/30 text-amber-300"
-                      : tool.status === "completed"
-                      ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-300"
-                      : tool.status === "error"
-                      ? "bg-red-500/10 border-red-500/30 text-red-300"
-                      : "bg-slate-800/50 border-slate-700 text-slate-400"
-                  }`}
-                >
-                  {tool.status === "running" ? (
-                    <Loader2 size={10} className="animate-spin" />
-                  ) : (
-                    <Wrench size={10} />
-                  )}
-                  <span className="truncate">{tool.data.toolName}</span>
-                </motion.div>
-              ))}
-              {tools.length > 5 && (
-                <div className="text-xs text-slate-500 px-2">
-                  +{tools.length - 5} more
-                </div>
-              )}
-            </motion.div>
-          )}
-        </AnimatePresence>
+          <Hexagon size={14} className={colors.text} />
+        </div>
       </div>
 
-      {/* Connector Arrow (except for last) */}
-      {!isLast && (
-        <motion.div
-          className="flex items-center mx-2"
-          variants={connectorVariants}
-          initial="hidden"
-          animate="visible"
-          style={{ originX: 0 }}
-        >
-          <div className="w-8 h-0.5 bg-gradient-to-r from-slate-600 to-slate-500" />
-          <ChevronRight size={16} className="text-slate-500 -ml-1" />
-        </motion.div>
-      )}
+      {/* 2. Body */}
+      <div className="p-3">
+        {/* Agent Name + Status Badge */}
+        <div className="flex items-center justify-between gap-2">
+          <h4 className="text-sm font-semibold text-slate-100 truncate flex-1" title={agent.data.agentName}>
+            {agent.data.agentName || "Unknown Agent"}
+          </h4>
+          <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded border ${
+            isRunning ? "bg-cyan-500/20 text-cyan-400 border-cyan-500/30" :
+            isCompleted ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30" :
+            isError ? "bg-red-500/20 text-red-400 border-red-500/30" :
+            "bg-slate-500/20 text-slate-400 border-slate-500/30"
+          }`}>
+            {agent.status.toUpperCase()}
+          </span>
+        </div>
+
+        {/* Time Info */}
+        <div className="flex items-center gap-2 mt-2 text-[10px] text-slate-500">
+          {agent.data.startTime && (
+            <span className="flex items-center gap-1">
+              <Timer size={10} />
+              {formatTime(agent.data.startTime)}
+            </span>
+          )}
+          {agent.data.endTime && (
+            <>
+              <span>→</span>
+              <span>{formatTime(agent.data.endTime)}</span>
+            </>
+          )}
+        </div>
+
+        {/* Stats Row */}
+        <div className="flex items-center gap-2 mt-2 flex-wrap">
+          {/* Duration */}
+          <span className="flex items-center gap-1 text-[10px] font-mono bg-slate-900/40 px-2 py-1 rounded border border-slate-800/50">
+            <Clock size={10} className="text-slate-500" />
+            <span className="text-slate-300">
+              {agent.data.duration ? formatDuration(agent.data.duration) : (isRunning ? "Running..." : "—")}
+            </span>
+          </span>
+
+          {/* Tokens */}
+          {agent.data.tokens !== undefined && agent.data.tokens > 0 && (
+            <span className="flex items-center gap-1 text-[10px] font-mono bg-slate-900/40 px-2 py-1 rounded border border-slate-800/50">
+              <Cpu size={10} className="text-purple-400" />
+              <span className="text-slate-300">{agent.data.tokens.toLocaleString()}</span>
+            </span>
+          )}
+
+          {/* Tools Count */}
+          <span className="flex items-center gap-1 text-[10px] font-mono bg-slate-900/40 px-2 py-1 rounded border border-slate-800/50">
+            <Wrench size={10} className="text-amber-400" />
+            <span className="text-slate-300">{tools.length}</span>
+            {toolsRunning > 0 && (
+              <span className="text-cyan-400 animate-pulse">({toolsRunning} active)</span>
+            )}
+          </span>
+        </div>
+
+        {/* 3. Tools List */}
+        <div className="mt-3 space-y-1">
+          <div className="text-[9px] text-slate-500 font-semibold tracking-wider mb-1">TOOLS</div>
+          {tools.slice(0, 4).map((tool) => {
+            const isToolRunning = tool.status === 'running';
+            const isToolCompleted = tool.status === 'completed';
+            const isToolError = tool.status === 'error';
+            return (
+              <div
+                key={tool.id}
+                className={`flex items-center gap-2 px-2 py-1.5 rounded border transition-colors ${
+                  isToolRunning ? "bg-amber-500/10 border-amber-500/30" :
+                  isToolError ? "bg-red-500/10 border-red-500/30" :
+                  "bg-slate-900/40 border-slate-800/50"
+                }`}
+              >
+                {isToolRunning ? (
+                  <Loader2 size={10} className="text-amber-400 animate-spin" />
+                ) : isToolCompleted ? (
+                  <CheckCircle2 size={10} className="text-emerald-400" />
+                ) : isToolError ? (
+                  <XCircle size={10} className="text-red-400" />
+                ) : (
+                  <Zap size={10} className="text-slate-600" />
+                )}
+                <span className="text-[10px] font-mono text-slate-300 truncate flex-1">
+                  {tool.data.toolName}
+                </span>
+                {tool.data.duration && (
+                  <span className="text-[9px] text-slate-500 font-mono">
+                    {formatDuration(tool.data.duration)}
+                  </span>
+                )}
+              </div>
+            );
+          })}
+
+          {tools.length > 4 && (
+            <div className="text-[10px] text-slate-500 pl-2 mt-1">
+              +{tools.length - 4} more...
+            </div>
+          )}
+          {tools.length === 0 && (
+            <div className="h-8 flex items-center justify-center text-[10px] text-slate-600 italic border border-dashed border-slate-700/50 rounded">
+              No tools called yet
+            </div>
+          )}
+        </div>
+      </div>
     </motion.div>
   );
 }
@@ -276,15 +275,11 @@ export default function AgentPipeline({ className = "", maxAgents = 10, isHistor
   // Convert to arrays and sort
   const agents = useMemo(() => {
     const agentArray = Array.from(agentRunsMap.values());
-
     // Sort by phase order, then by start time
     return agentArray.sort((a, b) => {
       const phaseA = PHASE_ORDER.indexOf(a.data.phase || "OSINT");
       const phaseB = PHASE_ORDER.indexOf(b.data.phase || "OSINT");
-
       if (phaseA !== phaseB) return phaseA - phaseB;
-
-      // Same phase, sort by start time
       const timeA = a.data.startTime ? new Date(a.data.startTime).getTime() : 0;
       const timeB = b.data.startTime ? new Date(b.data.startTime).getTime() : 0;
       return timeA - timeB;
@@ -294,94 +289,62 @@ export default function AgentPipeline({ className = "", maxAgents = 10, isHistor
   // Group tools by agent
   const toolsByAgent = useMemo(() => {
     const map = new Map<string, ToolCallNode[]>();
-
     Array.from(toolCallsMap.values()).forEach((tool) => {
       const agentId = tool.data.agentId;
       if (agentId) {
-        if (!map.has(agentId)) {
-          map.set(agentId, []);
-        }
+        if (!map.has(agentId)) map.set(agentId, []);
         map.get(agentId)!.push(tool);
       }
     });
-
     return map;
   }, [toolCallsMap]);
 
   // Auto-scroll to latest agent
   useEffect(() => {
     if (scrollRef.current && agents.length > 0) {
-      scrollRef.current.scrollLeft = scrollRef.current.scrollWidth;
+      setTimeout(() => {
+        if (scrollRef.current) scrollRef.current.scrollLeft = scrollRef.current.scrollWidth;
+      }, 100);
     }
   }, [agents.length]);
 
-  // Limit displayed agents
-  const displayedAgents = agents.slice(-maxAgents);
-
   return (
-    <div className={`relative ${className}`}>
-      {/* Header */}
-      <div className="flex items-center justify-between mb-3 px-2">
-        <div className="flex items-center gap-2">
-          <Cpu size={16} className="text-cyan-400" />
-          <span className="text-sm font-medium text-white">Agent Pipeline</span>
-        </div>
-        <span className="text-xs text-slate-500 font-mono">
-          {agents.length} agent{agents.length !== 1 ? "s" : ""}
+    <div className={`flex flex-col bg-slate-900/20 border-b border-slate-800 ${className}`}>
+      {/* Title */}
+      <div className="px-4 py-2 shrink-0">
+        <span className="text-[10px] font-bold text-slate-500 tracking-widest uppercase">
+          Active Pipeline
         </span>
       </div>
 
-      {/* Pipeline Container */}
+      {/* Pipeline Track */}
       <div
         ref={scrollRef}
-        className="overflow-x-auto overflow-y-visible pb-4 scrollbar-thin scrollbar-track-slate-900 scrollbar-thumb-slate-700"
+        className="flex-1 overflow-x-auto overflow-y-visible scrollbar-thin scrollbar-track-slate-900 scrollbar-thumb-slate-700 pb-4 px-4 flex items-center"
       >
-        <div className="flex items-start gap-0 px-4 min-h-[140px]">
-          <AnimatePresence mode="popLayout">
-            {displayedAgents.length === 0 ? (
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="flex items-center justify-center w-full h-[120px] text-slate-500 text-sm"
-              >
-                <div className="flex flex-col items-center gap-2">
-                  {isHistorical ? (
-                    <>
-                      <Cpu size={24} className="text-slate-600" />
-                      <span>No agent execution data recorded</span>
-                      <span className="text-xs text-slate-600">This mission was run before workflow tracking was enabled</span>
-                    </>
-                  ) : (
-                    <>
-                      <Loader2 size={24} className="animate-spin text-slate-600" />
-                      <span>Waiting for agents...</span>
-                    </>
-                  )}
-                </div>
-              </motion.div>
-            ) : (
-              displayedAgents.map((agent, index) => (
-                <AgentCard
-                  key={agent.id}
-                  agent={agent}
-                  tools={toolsByAgent.get(agent.id) || []}
-                  isLast={index === displayedAgents.length - 1}
-                  index={index}
-                />
-              ))
-            )}
-          </AnimatePresence>
-        </div>
-      </div>
+        <AnimatePresence>
+          {agents.map((agent, index) => (
+            <React.Fragment key={agent.id}>
+              {/* Agent Card */}
+              <AgentCard
+                agent={agent}
+                tools={toolsByAgent.get(agent.id) || []}
+              />
 
-      {/* Show more indicator */}
-      {agents.length > maxAgents && (
-        <div className="absolute left-0 top-1/2 -translate-y-1/2 bg-gradient-to-r from-slate-950 to-transparent pl-2 pr-6 py-2">
-          <span className="text-xs text-slate-500">
-            +{agents.length - maxAgents} earlier
-          </span>
-        </div>
-      )}
+              {/* Connector (if not last) */}
+              {index < agents.length - 1 && (
+                <ConnectionArrow />
+              )}
+            </React.Fragment>
+          ))}
+
+          {agents.length === 0 && (
+            <div className="w-full flex justify-center py-8 text-slate-600 text-sm font-mono">
+              {isHistorical ? "No pipeline data recorded." : "Waiting for agents to start..."}
+            </div>
+          )}
+        </AnimatePresence>
+      </div>
     </div>
   );
 }

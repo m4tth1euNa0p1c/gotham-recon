@@ -30,9 +30,15 @@ interface VulnerabilityNode {
     cve_id?: string;
     description?: string;
     target_id?: string;
-    evidence?: string;
+    evidence?: string | Record<string, unknown>;
     status?: string;
     cvss_score?: number;
+    attack_type?: string;
+    source?: string;
+    risk_score?: number;
+    template_id?: string;
+    matched_at?: string;
+    verified?: boolean;
   };
 }
 
@@ -284,6 +290,24 @@ export default function VulnerabilitiesPage() {
               <div className="space-y-4">
                 {filteredVulnerabilities.map((vuln, idx) => {
                   const severityConfig = getSeverityConfig(vuln.properties.severity);
+                  const attackType = vuln.properties.attack_type || "UNKNOWN";
+                  const source = vuln.properties.source || "unknown";
+                  const riskScore = vuln.properties.risk_score || 0;
+                  const isVerified = vuln.properties.verified || vuln.properties.status === "CONFIRMED";
+
+                  // Parse evidence if it's a string
+                  let evidenceObj: Record<string, unknown> | null = null;
+                  if (vuln.properties.evidence) {
+                    if (typeof vuln.properties.evidence === "string") {
+                      try {
+                        evidenceObj = JSON.parse(vuln.properties.evidence);
+                      } catch {
+                        evidenceObj = { raw: vuln.properties.evidence };
+                      }
+                    } else {
+                      evidenceObj = vuln.properties.evidence;
+                    }
+                  }
 
                   return (
                     <motion.div
@@ -298,42 +322,90 @@ export default function VulnerabilitiesPage() {
                           <div className={`p-2 rounded-lg ${severityConfig.bg}`}>
                             <Bug className={severityConfig.color} size={18} />
                           </div>
-                          <div>
-                            <h3 className="text-white font-medium">{vuln.properties.title || "Unnamed Vulnerability"}</h3>
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <h3 className="text-white font-medium">{vuln.properties.title || "Unnamed Vulnerability"}</h3>
+                              {isVerified && (
+                                <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-400 text-xs rounded flex items-center gap-1">
+                                  <CheckCircle size={10} /> Verified
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Attack type and source badges */}
+                            <div className="flex items-center gap-2 mt-2 flex-wrap">
+                              <span className="px-2 py-1 bg-purple-500/20 text-purple-400 rounded text-xs font-medium">
+                                {attackType}
+                              </span>
+                              <span className="px-2 py-1 bg-slate-700 text-slate-300 rounded text-xs">
+                                Source: {source}
+                              </span>
+                              {vuln.properties.template_id && (
+                                <span className="px-2 py-1 bg-cyan-500/10 text-cyan-400 rounded text-xs font-mono">
+                                  {vuln.properties.template_id}
+                                </span>
+                              )}
+                            </div>
+
                             {vuln.properties.cve_id && (
                               <a
                                 href={`https://nvd.nist.gov/vuln/detail/${vuln.properties.cve_id}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="text-cyan-400 hover:underline text-sm flex items-center gap-1 mt-1"
+                                className="text-cyan-400 hover:underline text-sm flex items-center gap-1 mt-2"
                               >
                                 {vuln.properties.cve_id}
                                 <ExternalLink size={12} />
                               </a>
                             )}
-                            {vuln.properties.target_id && (
-                              <p className="text-slate-500 text-sm mt-1">
-                                Target: <span className="font-mono text-slate-400">{vuln.properties.target_id}</span>
+                            {(vuln.properties.target_id || vuln.properties.matched_at) && (
+                              <p className="text-slate-500 text-sm mt-2">
+                                Target: <span className="font-mono text-slate-400">{vuln.properties.matched_at || vuln.properties.target_id}</span>
                               </p>
                             )}
                           </div>
                         </div>
-                        <div className="text-right">
+                        <div className="text-right flex flex-col items-end gap-2">
                           <span className={`px-3 py-1 rounded text-xs font-bold ${severityConfig.bg} ${severityConfig.color}`}>
                             {vuln.properties.severity?.toUpperCase() || "UNKNOWN"}
                           </span>
+                          {riskScore > 0 && (
+                            <div className="flex items-center gap-1">
+                              <div className="w-16 h-2 bg-slate-700 rounded-full overflow-hidden">
+                                <div
+                                  className={`h-full ${riskScore >= 75 ? 'bg-red-500' : riskScore >= 50 ? 'bg-amber-500' : 'bg-blue-500'}`}
+                                  style={{ width: `${riskScore}%` }}
+                                />
+                              </div>
+                              <span className="text-xs text-slate-400">{riskScore}</span>
+                            </div>
+                          )}
                           {vuln.properties.cvss_score && (
-                            <p className="text-slate-500 text-xs mt-1">CVSS: {vuln.properties.cvss_score}</p>
+                            <p className="text-slate-500 text-xs">CVSS: {vuln.properties.cvss_score}</p>
                           )}
                         </div>
                       </div>
                       {vuln.properties.description && (
                         <p className="text-slate-400 text-sm mt-3 ml-11">{vuln.properties.description}</p>
                       )}
-                      {vuln.properties.evidence && (
+
+                      {/* Enhanced evidence display */}
+                      {evidenceObj && Object.keys(evidenceObj).length > 0 && (
                         <div className="mt-3 ml-11 p-3 bg-slate-800/50 rounded-lg">
-                          <p className="text-xs text-slate-500 mb-1">Evidence:</p>
-                          <code className="text-xs text-slate-300 font-mono">{vuln.properties.evidence}</code>
+                          <p className="text-xs text-slate-500 mb-2 font-medium">Evidence:</p>
+                          <div className="space-y-1">
+                            {Object.entries(evidenceObj).map(([key, value]) => {
+                              if (!value || (Array.isArray(value) && value.length === 0)) return null;
+                              return (
+                                <div key={key} className="flex gap-2 text-xs">
+                                  <span className="text-slate-500 min-w-[100px]">{key}:</span>
+                                  <span className="text-slate-300 font-mono break-all">
+                                    {Array.isArray(value) ? value.join(", ") : String(value)}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
                         </div>
                       )}
                     </motion.div>

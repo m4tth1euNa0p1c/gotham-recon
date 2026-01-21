@@ -252,8 +252,9 @@ class MissionServiceClass {
     this.unsubscribeFromLogs();
     this.currentMissionId = missionId;
 
-    // Use SSE endpoint for logs - always use BFF Gateway
-    const url = `${ServiceConfig.BFF_GATEWAY}/api/v1/sse/events/${missionId}`;
+    // Use SSE endpoint for logs - uses Next.js rewrite proxy to BFF Gateway
+    // ServiceConfig.SSE_EVENTS returns a relative path like /api/v1/sse/events/{missionId}
+    const url = ServiceConfig.SSE_EVENTS(missionId);
 
     // Create EventSource for SSE
     try {

@@ -97,6 +97,7 @@ export function LiveStreamProvider({
   const addAgentRun = useWorkflowStore((state) => state.addAgentRun);
   const addToolCall = useWorkflowStore((state) => state.addToolCall);
   const reset = useWorkflowStore((state) => state.reset);
+  const forceCompleteAll = useWorkflowStore((state) => state.forceCompleteAll);
 
   // Calculate events per second
   useEffect(() => {
@@ -194,7 +195,11 @@ export function LiveStreamProvider({
       setProcessedCount(0);
       reconnectAttemptRef.current = 0;
       lastEventIdRef.current = null;  // Reset only on fresh connect
+      reset(); // Reset workflow store for fresh connection
     }
+
+    // Reset historical mode when connecting to live stream
+    setIsHistorical(false);
 
     setMissionId(newMissionId);
     setStatus("connecting");
@@ -301,21 +306,24 @@ export function LiveStreamProvider({
     console.log("[LiveStream] Loading historical data for mission:", newMissionId);
 
     try {
-      // Fetch workflow nodes from GraphQL
+      // Fetch workflow nodes from GraphQL - use inline query with enum values (no variables for types)
+      // GraphQL enums must be unquoted, so we can't use JSON variables
       const response = await fetch(`${ServiceConfig.BFF_GATEWAY}/graphql`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           query: `
             query GetWorkflowNodes($missionId: String!) {
-              workflowNodes(missionId: $missionId, types: [AGENT_RUN, TOOL_CALL]) {
+              nodes(missionId: $missionId, filter: { types: [AGENT_RUN, TOOL_CALL] }, limit: 1000) {
                 id
                 type
                 properties
               }
             }
           `,
-          variables: { missionId: newMissionId },
+          variables: {
+            missionId: newMissionId,
+          },
         }),
       });
 
@@ -326,7 +334,7 @@ export function LiveStreamProvider({
         throw new Error(result.errors[0]?.message || "GraphQL error");
       }
 
-      const nodes = result.data?.workflowNodes || [];
+      const nodes = result.data?.nodes || [];
 
       console.log(`[LiveStream] Loaded ${nodes.length} workflow nodes`);
 
@@ -334,11 +342,22 @@ export function LiveStreamProvider({
       nodes.forEach((node: any) => {
         const props = node.properties || {};
 
+        // Normalize status: backend may send 'success' instead of 'completed'
+        // Also use end_time as fallback indicator
+        const normalizeStatus = (status: string | undefined, hasEndTime: boolean): 'running' | 'completed' | 'error' | 'pending' => {
+          if (status === 'completed' || status === 'success') return 'completed';
+          if (status === 'running') return 'running';
+          if (status === 'error') return 'error';
+          // Fallback: if has end_time, consider completed
+          return hasEndTime ? 'completed' : 'running';
+        };
+
         if (node.type === "AGENT_RUN") {
+          const normalizedStatus = normalizeStatus(props.status, !!props.end_time);
           addAgentRun({
             id: node.id,
             label: props.agent_name || "Unknown Agent",
-            status: props.status || "completed",
+            status: normalizedStatus,
             metadata: {
               timestamp: props.start_time || new Date().toISOString(),
               phase: props.phase,
@@ -354,10 +373,11 @@ export function LiveStreamProvider({
           });
           setProcessedCount((c) => c + 1);
         } else if (node.type === "TOOL_CALL") {
+          const normalizedStatus = normalizeStatus(props.status, !!props.end_time);
           addToolCall({
             id: node.id,
             label: props.tool || "Unknown Tool",
-            status: props.status || "completed",
+            status: normalizedStatus,
             metadata: {
               timestamp: props.start_time || new Date().toISOString(),
               source: props.agent_id,
@@ -380,6 +400,9 @@ export function LiveStreamProvider({
       // Note: Logs query not available in current schema
       // Historical logs would need a separate endpoint
 
+      // Force complete all items since this is historical data (mission already finished)
+      forceCompleteAll();
+
       setStatus("historical");
       setConnectionStatus("connected");
       console.log("[LiveStream] Historical data loaded successfully");
@@ -388,7 +411,7 @@ export function LiveStreamProvider({
       setStatus("error");
       setConnectionStatus("error");
     }
-  }, [reset, addAgentRun, addToolCall, setConnectionStatus]);
+  }, [reset, addAgentRun, addToolCall, setConnectionStatus, forceCompleteAll]);
 
   // Disconnect from live stream only (preserves historical state)
   const disconnect = useCallback(() => {

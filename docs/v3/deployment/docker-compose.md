@@ -490,15 +490,63 @@ docker compose exec orchestrator python -m alembic upgrade head
 
 ### Problèmes Courants
 
-#### Kafka ne démarre pas
+#### Kafka ne démarre pas (NodeExistsException)
 
 ```bash
-# Vérifier les logs
-docker compose logs kafka zookeeper
+# Symptôme: Kafka crash avec "KeeperErrorCode = NodeExists"
+# Cause: Race condition au redémarrage avec ZooKeeper
 
-# Supprimer les volumes Kafka et redémarrer
-docker compose down -v
-docker compose up -d zookeeper kafka
+# Solution: Redémarrer séquentiellement
+docker compose restart zookeeper
+sleep 5
+docker compose restart kafka
+```
+
+#### BFF "Error fetching missions: ReadTimeout"
+
+```bash
+# Symptôme: [BFF] Error fetching missions: ReadTimeout
+# Cause: L'orchestrator est occupé avec une mission CrewAI (single worker)
+
+# Solution 1: Attendre que la mission se termine
+# Solution 2: Redémarrer l'orchestrator si bloqué
+docker compose restart recon-orchestrator
+
+# Note: Le timeout BFF est configuré à 60s depuis v3.2.1
+```
+
+#### UI affiche "No missions found"
+
+```bash
+# Symptôme: La page history n'affiche rien
+# Cause: L'UI ne peut pas atteindre le BFF Gateway
+
+# Vérifier que tous les services sont healthy
+docker ps --format "table {{.Names}}\t{{.Status}}"
+
+# Vérifier que le BFF répond
+curl http://localhost:8080/health
+
+# Vérifier GraphQL
+curl -X POST http://localhost:8080/graphql \
+  -H "Content-Type: application/json" \
+  -d '{"query":"{ missions { items { id } } }"}'
+
+# Si le GraphQL timeout, l'orchestrator est probablement bloqué
+docker compose restart recon-orchestrator
+```
+
+#### Orchestrator "unhealthy"
+
+```bash
+# Symptôme: Container orchestrator marqué "unhealthy"
+# Cause: L'exécution CrewAI bloque le worker uvicorn unique
+
+# Vérifier le statut
+docker ps --filter name=orchestrator
+
+# Redémarrer si nécessaire
+docker compose restart recon-orchestrator
 ```
 
 #### Service ne répond pas

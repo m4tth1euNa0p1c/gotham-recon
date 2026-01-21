@@ -1,12 +1,42 @@
-# Recon Gotham v3.2 - Documentation Technique Complète
+# Recon Gotham v3.2.1 - Documentation Technique Complète
 
 > **Plateforme de Reconnaissance Offensive Multi-Agents**
 >
-> Version: 3.2.0 | Dernière mise à jour: Décembre 2025
+> Version: 3.2.1 | Dernière mise à jour: Décembre 2025
 
 ---
 
-## Changelog v3.2 (Reflection Architecture + UI Fixes)
+## Changelog v3.2.1 (Stability & Vulnerability Scanning)
+
+### Nuclei Integration
+
+| Feature | Description |
+|---------|-------------|
+| **NucleiTool** | Intégration complète de Nuclei pour la détection de vulnérabilités |
+| **Template Support** | Support des templates `cves`, `exposures`, `misconfiguration`, `vulnerabilities` |
+| **Severity Mapping** | Mapping automatique des sévérités vers CVSS (CRITICAL → 9.0, HIGH → 7.0) |
+| **Graph Integration** | Les vulnérabilités sont ajoutées au graphe avec nodes VULNERABILITY |
+
+### Frontend Real-time Fixes
+
+| Fix | Description |
+|-----|-------------|
+| **Direct URL Access** | UI utilise des URLs directes vers les ports Docker exposés |
+| **ServiceConfig** | Configuration dynamique basée sur `window.location.hostname` |
+| **Next.js Rewrites** | Backup proxy via rewrites pour compatibilité |
+| **substring Errors** | Correction des erreurs undefined dans WorkflowHierarchy, AssetMap, AgentPipeline |
+
+### Backend Reliability
+
+| Fix | Description |
+|-----|-------------|
+| **BFF Timeout** | Augmentation de 10s à 60s pour éviter les ReadTimeout |
+| **Error Logging** | Traceback complet dans les logs d'erreur BFF |
+| **Kafka Reconnect** | Meilleure gestion des reconnexions après redémarrage |
+
+---
+
+## Changelog v3.2.0 (Reflection Architecture + UI Fixes)
 
 ### P0.6 - Reflection Architecture (Nouveau)
 
